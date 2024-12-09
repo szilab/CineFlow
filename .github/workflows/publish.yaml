@@ -5,6 +5,10 @@ on:
     types: [published]
   workflow_dispatch:
 
+branches:
+  except:
+    - main
+
 jobs:
   build:
     name: Push Docker image to Docker Hub
@@ -38,6 +42,12 @@ jobs:
         push: true
         tags: ${{ steps.metadata.outputs.tags }}
         labels: ${{ steps.metadata.outputs.labels }}
+
+    - name: Update latest tag
+      run: |
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.metadata.outputs.tags }}
+        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.metadata.outputs.tags }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
     - name: Generate artifact
       uses: actions/attest-build-provenance@v1
