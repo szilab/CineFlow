@@ -2,7 +2,7 @@
 
 from bases.abs import ModuleBase
 from bases.enums import MediaType
-from system.config import Config
+from system.config import cfg
 from system.logger import log
 from system.database import Database as db
 
@@ -13,13 +13,12 @@ class DownloaderModule(ModuleBase):
     def __init__(self, media_type: MediaType):
         self._name = "Downloader"
         self._type = media_type.value
-        self._ready = self._is_required_config_set([
-            'DOWNLOADER_URL',
-            'DOWNLOADER_USER',
-            'DOWNLOADER_PASSW',
-        ])
+        self._ready = self._is_required_config_set(
+            names=['url', 'user', 'passw'],
+            category='downloader'
+        )
         self._req = self._init(
-            url=Config().downloader_url + "/api/v2"
+            url=cfg(name='url', category='downloader') + "/api/v2"
         )
         if self._ready:
             self._sid = self._auth()
@@ -57,7 +56,10 @@ class DownloaderModule(ModuleBase):
     def _auth(self) -> str:
         response = self._req.post(
             endpoint="auth/login",
-            data={"username": Config().downloader_user, "password": Config().downloader_passw},
+            data={
+                "username": cfg(name='user', category='downloader'),
+                "password": cfg(name='passw', category='downloader')
+            },
             key="sid"
         )
         sid = response.cookies.get("SID")
@@ -75,8 +77,8 @@ class DownloaderModule(ModuleBase):
 
     def _add(self, link: str) -> bool:
         data = {"urls": link}
-        if Config().downloader_savepath:
-            data["savepath"] = Config().downloader_savepath
+        if cfg(name='savepath', category='downloader'):
+            data["savepath"] = cfg(name='savepath', category='downloader')
         response = self._req.post(
             endpoint="torrents/add",
             data=data,

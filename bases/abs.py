@@ -5,7 +5,7 @@ import re
 from abc import ABC, ABCMeta
 from bases.enums import Phases
 from bases.request import RequestHandler
-from system.config import Config
+from system.config import cfg
 from system.logger import log
 
 
@@ -45,12 +45,11 @@ class ModuleBase(ABC, metaclass=SingletonMeta):
         else:
             log(f"{self.name()} does not support the '{phase.name}' phase")
 
-    def _is_required_config_set(self, required_config: list, exit_on_failure: bool = False) -> None:
-        for config in required_config:
-            value = getattr(Config(), config, None)
-            if not value:
+    def _is_required_config_set(self, names: list[str], category: str, exit_on_failure: bool = False) -> None:
+        for name in names:
+            if not cfg(name=name, category=category):
                 log(
-                    f"The config parameter '{config}' is not set, "
+                    f"The config parameter '{category}.{name}' is not set, "
                     "skipping related tasks!",
                     level="WARNING"
                 )

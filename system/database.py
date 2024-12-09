@@ -12,7 +12,7 @@ from bases.enums import MediaType
 class Database:
     """Database class for storing media information"""
     _instances = {}
-    _path = os.path.join(Config().data_dir, 'database.db')
+    _path = os.path.join(Config().get_data_dir(), 'database.db')
     _lock = threading.Lock()
 
     def __call__(self, *args, **kwargs):

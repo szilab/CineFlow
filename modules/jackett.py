@@ -6,7 +6,7 @@ from bases.abs import ModuleBase
 from bases.utils import st
 from bases.utils import sort_data
 from bases.enums import MediaType
-from system.config import Config
+from system.config import cfg
 from system.database import Database as db
 from system.logger import log
 
@@ -17,12 +17,15 @@ class JackettModule(ModuleBase):
     def __init__(self, media_type: MediaType):
         self._name = "Jackett"
         self._type = media_type.value
-        self._limit = 5
-        self._ready = self._is_required_config_set(['JACKETT_URL', 'JACKETT_KEY'])
+        self._limit = cfg(name='limit', category='modules')
+        self._ready = self._is_required_config_set(
+            names=['url', 'key'],
+            category='jackett'
+        )
         self._default_categories = '2000' if self._type == MediaType.MOVIE else '5000'
-        self._categories = Config().jacket_categories or self._default_categories
+        self._categories = cfg(name='categories', category='jackett') or self._default_categories
         self._req = self._init(
-            url=Config().jacket_url + "/api/v2.0/indexers/all"
+            url=cfg(name='url', category='jackett') + "/api/v2.0/indexers/all"
         )
 
     def collect(self) -> list:
@@ -40,10 +43,14 @@ class JackettModule(ModuleBase):
                 self._to_db(metadata)
 
     def _search(self, title: str, year: str) -> Any:
-        query = f"{title} {year} {Config().jacket_include}".strip()
+        query = f"{title} {year} {cfg(name='include', category='jackett')}".strip()
         results = self._req.get(
             endpoint="results",
-            params={"apikey": Config().jacket_key, "Category[]": self._categories, "Query": query},
+            params={
+                "apikey": cfg(name='key', category='jackett'),
+                "Category[]": self._categories,
+                "Query": query
+            },
             key="Results"
         )
         result = sort_data(data=results.data, param="Seeders", reverse=True)

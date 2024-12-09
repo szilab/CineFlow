@@ -1,9 +1,22 @@
 """App config module"""
 
 import os
+import os.path as path
+import sys
+import json
+from typing import Any
+from jsonschema import Draft7Validator
 
 
-class Config():  # pylint: disable=too-few-public-methods,too-many-instance-attributes
+def cfg(name: str, category: str, value: Any = None) -> str:
+    """Shortcut for Config get and set"""
+    if value is not None:
+        Config().set(name=name, category=category, value=value)
+        return value
+    return Config().get(name, category)
+
+
+class Config():
     """App configuration"""
     _instances = {}
 
@@ -13,29 +26,69 @@ class Config():  # pylint: disable=too-few-public-methods,too-many-instance-attr
         return self._instances[self]
 
     def __init__(self) -> None:
-        self.data_dir = os.getenv('DATA_DIR', './config')
-        self.library_dir = os.getenv('LIBRARY_DIR', './config')
-        self.retention = int(os.getenv('RETENTION')) if os.getenv('RETENTION') else 90
-        self.interval = int(os.getenv('INTERVAL')) if os.getenv('INTERVAL') else 120
-        self.twshows = bool(os.getenv('TWSHOWS'))
-        self.log_level = os.getenv('LOG_LEVEL', 'INFO')
-        self.log_colors = bool(os.getenv('LOG_COLORS'))
-        self.tmdb_key = os.getenv('TMDB_KEY', '')
-        self.tmdb_lang = os.getenv('TMDB_LANG', 'en-US')
-        self.jacket_url = os.getenv('JACKETT_URL', '')
-        self.jacket_key = os.getenv('JACKETT_KEY', '')
-        self.jacket_categories = os.getenv('JACKETT_CATEGORIES', '')
-        self.jacket_include = os.getenv('JACKETT_INCLUDE', '')
-        self.jacket_exclude = os.getenv('JACKETT_EXCLUDE', 'dummy_BvTKb37YD3hadR89zkUI')
-        self.jellyfin_url = os.getenv('JELLYFIN_URL', '')
-        self.jellyfin_key = os.getenv('JELLYFIN_KEY', '')
-        self.jellyfin_user = os.getenv('JELLYFIN_USER', '')
-        self.jellyfin_libraries = os.getenv('JELLYFIN_LIBRARIES', '')
-        self.trakt_client_id = os.getenv('TRAKT_CLIENT_ID', '')
-        self.trakt_client_secret = os.getenv('TRAKT_CLIENT_SECRET', '')
-        self.trakt_access_token = os.getenv('TRAKT_ACCESS_TOKEN', '')
-        self.border_rules = os.getenv('BORDER_RULES', '')
-        self.downloader_url = os.getenv('DOWNLOADER_URL', '')
-        self.downloader_user = os.getenv('DOWNLOADER_USER', '')
-        self.downloader_passw = os.getenv('DOWNLOADER_PASSW', '')
-        self.downloader_savepath= os.getenv('DOWNLOADER_SAVEPATH', '')
+        self._data_dir = os.getenv('DATA_DIR', '/data')
+        self._app_dir = path.dirname(path.dirname(__file__))
+
+        self._schema_file = f"{self._app_dir}/schema.json"
+        self._config_file = f"{self._data_dir}/config.json"
+        self.config = {}
+
+        with open(self._schema_file, 'r', encoding='UTF-8') as f:
+            schema = json.load(f)
+        if os.path.exists(self._config_file):
+            with open(self._config_file, 'r', encoding='UTF-8') as f:
+                config = json.load(f)
+        else:
+            config = {}
+        self._validate_and_apply_defaults(config=config, schema=schema)
+        self._overwrite_from_env()
+
+    def get_data_dir(self) -> str:
+        """Get data directory"""
+        return self._data_dir
+
+    def get(self, name: str, category: str) -> str:
+        """Get config value"""
+        if category in self.config:
+            return self.config[category].get(name, None)
+        return None
+
+    def set(self, name: str, category: str, value: Any) -> None:
+        """Set config value"""
+        if category not in self.config:
+            self.config[category] = {}
+        self.config[category][name] = value
+        self._save()
+
+    def _save(self) -> None:
+        with open(f"{self._data_dir}/config.json", 'w', encoding='UTF-8') as f:
+            f.write(json.dumps(self.config, indent=4))
+
+    def _overwrite_from_env(self) -> None:
+        """Overwrite config from environment variables"""
+        for key in self.config.keys():
+            for e in os.environ:
+                if e.startswith(f"{key.upper()}_"):
+                    category = key
+                    _, name = e.split('_', 1)
+                    self.config[category][name.lower()] = os.getenv(e)
+
+    def _validate_and_apply_defaults(self, config: dict, schema: dict) -> None:
+        validator = Draft7Validator(schema=schema)
+        for error in sorted(validator.iter_errors(config), key=lambda e: e.path):
+            print(f"Config validation error: {error.message} at {list(error.path)}")
+            sys.exit(1)
+        self.config = self._apply_defaults(instance=config, schema=schema)
+
+    @staticmethod
+    def _apply_defaults(instance: dict, schema: dict) -> dict:
+        """recursively apply defaults to instance"""
+        if "properties" in schema:
+            for key, value in schema["properties"].items():
+                if key not in instance and "default" in value:
+                    instance[key] = value.get("default")
+                if "properties" in value:
+                    instance[key] = Config._apply_defaults(instance.get(key, {}), value)
+        if "default" in schema:
+            instance = schema.get("default")
+        return instance

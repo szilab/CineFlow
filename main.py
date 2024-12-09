@@ -6,7 +6,7 @@ import sys
 from bases.enums import MediaType
 from system.logger import log
 from system.runner import TaskRunner
-from system.config import Config
+from system.config import cfg
 
 
 THREADS = []
@@ -22,12 +22,22 @@ def stop(sig, frame):
 
 def main():
     """Main entry point for the application"""
+    log("Starting up")
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
-    if Config().twshows:
+
+    found_any = False
+    if cfg(name='twshows', category='refresh'):
         log("TV shows enabled")
+        found_any = True
         THREADS.append(threading.Thread(target=TaskRunner(media_type=MediaType.TV).run).start())
-    THREADS.append(threading.Thread(target=TaskRunner(media_type=MediaType.MOVIE).run).start())
+    if cfg(name='movies', category='refresh'):
+        log("Movies enabled")
+        found_any = True
+        THREADS.append(threading.Thread(target=TaskRunner(media_type=MediaType.MOVIE).run).start())
+    if not found_any:
+        log("No media types enabled, check config! Exiting!")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

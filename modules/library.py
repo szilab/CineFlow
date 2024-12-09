@@ -6,7 +6,7 @@ from bases.abs import ModuleBase
 from bases.enums import MediaType
 from bases.utils import sort_data
 from bases.image import ImageHandler
-from system.config import Config
+from system.config import cfg, Config
 from system.database import Database as db
 from system.logger import log
 
@@ -17,13 +17,14 @@ class LibraryModule(ModuleBase):
     def __init__(self, media_type: MediaType):
         self._name = "Library"
         self._type = media_type.value
-        self._limit = 20
-        self._ready = self._is_required_config_set(['DATA_DIR'])
+        self._limit = 100
         self._exported = []
-        if self._ready:
-            self._library = Path(Config().data_dir + "/" + self._type)
-            self._library.mkdir(parents=True, exist_ok=True)
-            self._ready = self._library.exists()
+        self._data_dir = cfg(name='export_to', category='directory')
+        if not self._data_dir:
+            self._data_dir = Config().get_data_dir()
+        self._library = Path(self._data_dir + "/" + self._type)
+        self._library.mkdir(parents=True, exist_ok=True)
+        self._ready = self._library.exists()
 
     def export(self):
         """Export media items to library"""
