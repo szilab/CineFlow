@@ -21,7 +21,7 @@ class TmdbModule(ModuleBase):
             url="https://api.themoviedb.org/3",
         )
 
-    def collect(self):  # pylint: disable=duplicate-code
+    def collect(self):
         """Collect popular media items from TMDb API."""
         data = self._collect()
         log(f"Collected {len(data)} popular {self._type}s from {self._name}")
@@ -81,7 +81,7 @@ class TmdbModule(ModuleBase):
                 break
         return data[:self._limit]
 
-    def _to_db(self, metadata: dict): # pylint: disable=duplicate-code
+    def _to_db(self, metadata: dict):
         db().add(
             table=self._type,
             title=st(self._media_title(metadata)),
