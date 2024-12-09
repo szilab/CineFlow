@@ -5,13 +5,10 @@ on:
     types: [published]
   workflow_dispatch:
 
-branches:
-  except:
-    - main
-
 jobs:
   build:
     name: Push Docker image to Docker Hub
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       packages: write
