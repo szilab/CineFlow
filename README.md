@@ -1,4 +1,4 @@
-# Media Management System
+# CineFlow - Media Management System
 
 This project is a media management system that automates the collection, search, and export of media information from various sources. It supports integration with multiple modules such as Jackett, Jellyfin, TMDb, and qBittorrent currentl.
 
@@ -43,4 +43,3 @@ At the moment this project in the really early phase and still developed by orig
 ## License
 
 This project is licensed under the MIT License.
-```

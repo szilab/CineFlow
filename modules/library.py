@@ -1,3 +1,5 @@
+"""Library module for media server"""
+
 import shutil
 from pathlib import Path
 from bases.abs import ModuleBase
@@ -10,21 +12,24 @@ from system.logger import log
 
 
 class LibraryModule(ModuleBase):
-    def __init__(self, type: MediaType):
+    """Library module for media server"""
+
+    def __init__(self, media_type: MediaType):
         self._name = "Library"
-        self._type = type.value
+        self._type = media_type.value
         self._limit = 20
         self._ready = self._is_required_config_set(['DATA_DIR'])
         self._exported = []
         if self._ready:
-            self._library = Path(Config().DATA_DIR + "/" + self._type)
+            self._library = Path(Config().data_dir + "/" + self._type)
             self._library.mkdir(parents=True, exist_ok=True)
             self._ready = self._library.exists()
 
     def export(self):
-        all = sort_data(data=db().get_all(self._type), param='updated_at', reverse=True)
+        """Export media items to library"""
+        all_rows = sort_data(data=db().get_all(self._type), param='updated_at', reverse=True)
         self._exported = []
-        for item in all:
+        for item in all_rows:
             if item.get('collected') != 'false':
                 if item.get('title') and item.get('poster'):
                     name = item.get('title') + " (" + item.get('year') + ")"
@@ -34,9 +39,16 @@ class LibraryModule(ModuleBase):
                     if len(self._exported) >= self._limit:
                         break
                 else:
-                    log(f"Skipping item export {item.get('title')} due to missing data", level='WARNING')
+                    log(
+                        f"Skipping item export {item.get('title')} due to missing data",
+                        level='WARNING'
+                    )
             else:
-                log(f"Skipping item export {item.get('title')} due to already available in media server", level='DEBUG')
+                log(
+                    f"Skipping item export {item.get('title')} due to already "
+                    "available in media server",
+                    level='DEBUG'
+                )
         for f in self._library.iterdir():
             self._rm(folder=f)
 

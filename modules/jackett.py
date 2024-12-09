@@ -1,4 +1,7 @@
+"""Jackett module for collecting and searching items from Jackett API."""
+
 import re
+from typing import Any
 from bases.abs import ModuleBase
 from bases.utils import st
 from bases.utils import sort_data
@@ -6,38 +9,41 @@ from bases.enums import MediaType
 from system.config import Config
 from system.database import Database as db
 from system.logger import log
-from typing import Any
 
 
 class JackettModule(ModuleBase):
-    def __init__(self, type: MediaType):
+    """Jackett module for collecting and searching items from Jackett API."""
+
+    def __init__(self, media_type: MediaType):
         self._name = "Jackett"
-        self._type = type.value
+        self._type = media_type.value
         self._limit = 5
         self._ready = self._is_required_config_set(['JACKETT_URL', 'JACKETT_KEY'])
         self._default_categories = '2000' if self._type == MediaType.MOVIE else '5000'
-        self._categories = Config().JACKETT_CATEGORIES or self._default_categories
+        self._categories = Config().jacket_categories or self._default_categories
         self._req = self._init(
-            url=Config().JACKETT_URL + "/api/v2.0/indexers/all"
+            url=Config().jacket_url + "/api/v2.0/indexers/all"
         )
 
     def collect(self) -> list:
+        """Collect popular items from Jackett API."""
         data = self._collect()
         log(f"Collected {len(data)} popular {self._type}s from {self._name}")
         for metadata in data:
             self._to_db(metadata)
 
     def search(self):
-        all = db().get_all(self._type)
-        for item in all:
+        """Search for items in Jackett API."""
+        all_rows = db().get_all(self._type)
+        for item in all_rows:
             if metadata := self._search(title=item['title'], year=item['year']):
                 self._to_db(metadata)
 
     def _search(self, title: str, year: str) -> Any:
-        query = f"{title} {year} {Config().JACKETT_INCLUDE}".strip()
+        query = f"{title} {year} {Config().jacket_include}".strip()
         results = self._req.get(
-            endpoint=f"results",
-            params={"apikey": Config().JACKETT_KEY, "Category[]": self._categories, "Query": query},
+            endpoint="results",
+            params={"apikey": Config().jacket_key, "Category[]": self._categories, "Query": query},
             key="Results"
         )
         result = sort_data(data=results.data, param="Seeders", reverse=True)

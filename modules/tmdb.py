@@ -1,3 +1,5 @@
+"""TMDb module for collecting metadata from The Movie Database API."""
+
 from bases.abs import ModuleBase
 from bases.enums import MediaType
 from bases.utils import st
@@ -7,9 +9,11 @@ from system.logger import log
 
 
 class TmdbModule(ModuleBase):
-    def __init__(self, type: MediaType):
+    """TMDb module for collecting metadata from The Movie Database API."""
+
+    def __init__(self, media_type: MediaType):
         self._name = "TMDb"
-        self._type = type.value
+        self._type = media_type.value
         self._limit = 20
         self._imageurl = "https://image.tmdb.org/t/p/original"
         self._ready = self._is_required_config_set(['TMDB_KEY'])
@@ -18,29 +22,48 @@ class TmdbModule(ModuleBase):
         )
 
     def collect(self):
+        """Collect popular media items from TMDb API."""
         data = self._collect()
         log(f"Collected {len(data)} popular {self._type}s from {self._name}")
         for metadata in data:
             self._to_db(metadata)
 
     def search(self):
-        all = db().get_all(self._type)
-        for item in all:
-            if metadata := self._search(title=item['title'], year=item['year'], aliases=item['aliases']):
+        """Search and update metadata for media items in database."""
+        all_rows = db().get_all(self._type)
+        for item in all_rows:
+            metadata = self._search(
+                title=item['title'],
+                year=item['year'],
+                aliases=item['aliases']
+            )
+            if metadata:
                 self._to_db(metadata)
 
     def _search(self, title: str, year: str, aliases: str = '') -> list:
-        for lang in [Config().TMDB_LANG, "en-US"]:
+        def _is_in_title(string, title, aliases):
+            return (
+                st(string) == st(title)
+                or
+                st(string) + ',' in st(aliases)
+            )
+
+        for lang in [Config().tmdb_lang, "en-US"]:
             response = self._req.get(
                 endpoint=f"search/{self._type}",
-                params={"api_key": Config().TMDB_KEY, "query": title, "year": year, "language": lang},
+                params={
+                    "api_key": Config().tmdb_key,
+                    "query": title,
+                    "year": year,
+                    "language": lang
+                },
                 key="results"
             )
             for result in response.data:
                 if result.get('release_date')[:4] == year:
-                    if st(result.get('title')) == st(title) or st(result.get('title')) + ',' in st(aliases):
+                    if _is_in_title(result.get('title'), title, aliases):
                         return result
-                    if st(result.get('original_title')) == st(title) or st(result.get('original_title')) + ',' in st(aliases):
+                    if _is_in_title(result.get('original_title'), title, aliases):
                         return result
         log(f"Could not identify '{title} ({year})' with TMDb", level='DEBUG')
         return None
@@ -50,7 +73,7 @@ class TmdbModule(ModuleBase):
         for page in range(1, 20):
             chunk = self._req.get(
                 endpoint=f"{self._type}/popular",
-                params={"api_key": Config().TMDB_KEY, "page": page, "language": Config().TMDB_LANG},
+                params={"api_key": Config().tmdb_key, "page": page, "language": Config().tmdb_lang},
                 key="results"
             )
             data.extend(chunk.data)
@@ -71,13 +94,22 @@ class TmdbModule(ModuleBase):
         )
 
     def _media_title(self, metadata: dict) -> None:
-        return metadata.get('original_title') if metadata.get('original_title') else metadata.get('title')
+        if metadata.get('original_title'):
+            return metadata.get('original_title')
+        else:
+            return metadata.get('title')
 
     def _media_year(self, metadata: dict) -> None:
         return metadata.get('release_date')[:4]
 
     def _media_alias(self, metadata: dict) -> None:
-        return metadata.get('title') if self._media_title(metadata) != metadata.get('title') else ""
+        if self._media_title(metadata) != metadata.get('title'):
+            return metadata.get('title')
+        else:
+            return ""
 
     def _media_poster(self, metadata: dict) -> None:
-        return self._imageurl + str(metadata.get('poster_path')) if metadata.get('poster_path') else ""
+        if metadata.get('poster_path'):
+            return self._imageurl + str(metadata.get('poster_path'))
+        else:
+            return ""

@@ -1,11 +1,15 @@
-import requests
+"""Image handler for the metadata posters."""
+
 import re
-from PIL import Image, ImageOps
+import requests
+from PIL import Image, ImageOps, UnidentifiedImageError
 from system.config import Config
 from system.logger import log
 
 
 class ImageHandler():
+    """Image handler for the metadata"""
+
     def __init__(self, metadata: dict) -> None:
         self._metadata = metadata
         self._scale = (600, 900)
@@ -13,6 +17,7 @@ class ImageHandler():
         self._positions = ['center', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
 
     def save(self, folder: str) -> None:
+        """Save the image to the folder"""
         url = self._metadata.get('poster')
         if not url:
             return
@@ -25,8 +30,8 @@ class ImageHandler():
 
     def _load_image_from_url(self, url: str) -> Image.Image:
         try:
-            img = Image.open(requests.get(url, stream=True).raw)
-        except Exception as e:
+            img = Image.open(requests.get(url, stream=True, timeout=10).raw)
+        except (FileNotFoundError, UnidentifiedImageError) as e:
             log(f"Error loading image: {e}", level='WARNING')
             return None
         return img
@@ -35,13 +40,16 @@ class ImageHandler():
         if not self._metadata.get('link'):
             img = ImageOps.grayscale(img)
             log(f"Applied grayscale to image '{self._metadata.get('title')}'", level='DEBUG')
-        if Config().BORDER_RULES and self._metadata.get('torrent'):
-            for rule in Config().BORDER_RULES.split(';'):
+        if Config().border_rules and self._metadata.get('torrent'):
+            for rule in Config().border_rules.split(';'):
                 if '=' in rule:
                     match, color = rule.split('=')
                     if re.search(match, self._metadata.get('torrent').lower()):
                         img = self._apply_border(img=img, color=color)
-                        log(f"Applied border '{color}' to image '{self._metadata.get('title')}'", level='DEBUG')
+                        log(
+                            f"Applied border '{color}' to image '{self._metadata.get('title')}'",
+                            level='DEBUG'
+                        )
         return img
 
     def _apply_border(self, img: Image.Image, color: str) -> Image.Image:

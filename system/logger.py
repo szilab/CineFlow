@@ -1,9 +1,12 @@
+"""Logger module for logging messages to the console."""
+
 import threading
 from datetime import datetime
 from system.config import Config
 
 
 def log(*values, level: str = 'INFO'):
+    """Shortcut to log a message to the console."""
     Logger().log(*values, level=level)
 
 
@@ -25,24 +28,27 @@ LogColors = {
 
 
 class Logger():
+    """Logger class for logging messages to the console."""
+    _instances = {}
 
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            cls._instances[cls] = super(Logger, cls).__call__(*args, **kwargs)
-        return cls._instances[cls]
+    def __call__(self, *args, **kwargs):
+        if self not in self._instances:
+            self._instances[self] = super(Logger, self).__call__(*args, **kwargs)  # pylint: disable=no-member
+        return self._instances[self]
 
     def __init__(self):
-        if Config().LOG_LEVEL in LogLevels:
-            self._level = Config().LOG_LEVEL
+        if Config().log_level in LogLevels:
+            self._level = Config().log_level
         else:
             self._level = 'INFO'
-        self._colors = Config().LOG_COLORS
+        self._colors = Config().log_colors
         self._lock = threading.Lock()
 
     def __should_log(self, level):
         return LogLevels[level] >= LogLevels[self._level]
 
     def log(self, *values, level: str = 'INFO'):
+        """Log a message to the console."""
         if not self.__should_log(level):
             return
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
