@@ -5,10 +5,6 @@ on:
     types: [published]
   workflow_dispatch:
 
-branches:
-  except:
-    - main
-
 jobs:
   build:
     name: Push Docker image to Docker Hub
