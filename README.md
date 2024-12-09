@@ -5,6 +5,8 @@ This project is a media management system that automates the collection, search,
 Planned fatures:
     - Support Plex.tv, Transmission and other media sources
 
+GitHub: [huszilagyisandor/CineFlow](https://github.com/huszilagyisandor/CineFlow)
+
 ## Getting Started
 
 ### Prerequisites
@@ -22,12 +24,19 @@ Planned fatures:
 
 2. Install the required packages:
     ```sh
-    pip install PyYAML, requests, pillow
+    pip install -r requirements.txt
     ```
 
 ### Configuration
 
 Configure the system by setting environment variables or modifying the `ConfigParams` in `system/config.py`.
+
+### Run via Docker
+
+```sh
+docker run -d --name CineFlow --env <specify all env you need> --restart unless-stopped sandorszilagyi/cineflow
+```
+
 
 ### Running the Application
 
