@@ -33,7 +33,7 @@ class Logger():
 
     def __call__(self, *args, **kwargs):
         if self not in self._instances:
-            self._instances[self] = super(Logger, self).__call__(*args, **kwargs)  # pylint: disable=no-member
+            self._instances[self] = super(Logger, self).__call__(*args, **kwargs)  # pylint: disable=no-member,super-with-arguments
         return self._instances[self]
 
     def __init__(self):

@@ -1,6 +1,7 @@
 """Image handler for the metadata posters."""
 
 import re
+from pathlib import Path
 import requests
 from PIL import Image, ImageOps, UnidentifiedImageError
 from system.config import Config
@@ -27,6 +28,12 @@ class ImageHandler():
         img = self._apply_rules(img=img)
         img.save(folder / "poster.png")
         log(f"Saved poster to '{folder}'", level='DEBUG')
+
+    def get(self, folder: str) -> Image.Image:
+        """Get the image from the metadata"""
+        if Path(folder / "poster.png").exists():
+            return Image.open(folder / "poster.png")
+        return None
 
     def _load_image_from_url(self, url: str) -> Image.Image:
         try:
@@ -61,12 +68,12 @@ class ImageHandler():
     def __fix_color_names(self, color: str) -> str:
         if color == 'red':
             return 'ea1029'
-        elif color == 'green':
+        if color == 'green':
             return '18dd32'
-        elif color == 'blue':
+        if color == 'blue':
             return '183fdd'
-        elif color == 'yellow':
+        if color == 'yellow':
             return 'fce705'
-        elif color == 'magenta':
+        if color == 'magenta':
             return 'dd18a4'
         return color

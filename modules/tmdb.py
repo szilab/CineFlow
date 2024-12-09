@@ -21,7 +21,7 @@ class TmdbModule(ModuleBase):
             url="https://api.themoviedb.org/3",
         )
 
-    def collect(self):
+    def collect(self):  # pylint: disable=duplicate-code
         """Collect popular media items from TMDb API."""
         data = self._collect()
         log(f"Collected {len(data)} popular {self._type}s from {self._name}")
@@ -81,7 +81,7 @@ class TmdbModule(ModuleBase):
                 break
         return data[:self._limit]
 
-    def _to_db(self, metadata: dict):
+    def _to_db(self, metadata: dict): # pylint: disable=duplicate-code
         db().add(
             table=self._type,
             title=st(self._media_title(metadata)),
@@ -96,8 +96,7 @@ class TmdbModule(ModuleBase):
     def _media_title(self, metadata: dict) -> None:
         if metadata.get('original_title'):
             return metadata.get('original_title')
-        else:
-            return metadata.get('title')
+        return metadata.get('title')
 
     def _media_year(self, metadata: dict) -> None:
         return metadata.get('release_date')[:4]
@@ -105,11 +104,9 @@ class TmdbModule(ModuleBase):
     def _media_alias(self, metadata: dict) -> None:
         if self._media_title(metadata) != metadata.get('title'):
             return metadata.get('title')
-        else:
-            return ""
+        return ""
 
     def _media_poster(self, metadata: dict) -> None:
         if metadata.get('poster_path'):
             return self._imageurl + str(metadata.get('poster_path'))
-        else:
-            return ""
+        return ""

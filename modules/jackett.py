@@ -25,7 +25,7 @@ class JackettModule(ModuleBase):
             url=Config().jacket_url + "/api/v2.0/indexers/all"
         )
 
-    def collect(self) -> list:
+    def collect(self) -> list:  # pylint: disable=duplicate-code
         """Collect popular items from Jackett API."""
         data = self._collect()
         log(f"Collected {len(data)} popular {self._type}s from {self._name}")
@@ -51,15 +51,14 @@ class JackettModule(ModuleBase):
             for item in result:
                 if st(title) in st(item.get('Title')) and year in item.get('Title'):
                     return item
-                else:
-                    log(f"Could not find '{title} ({year})' with Jackett", level='DEBUG')
-                    return None
+                log(f"Could not find '{title} ({year})' with Jackett", level='DEBUG')
+                return None
         return result
 
     def _collect(self):
         return self._search(title="", year="")[:self._limit]
 
-    def _to_db(self, metadata: dict):
+    def _to_db(self, metadata: dict):  # pylint: disable=duplicate-code
         if self._media_title(metadata) and self._media_year(metadata):
             db().add(
                 table=self._type,
