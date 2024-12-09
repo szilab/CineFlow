@@ -23,7 +23,7 @@ class DownloaderModule(ModuleBase):
         )
         if self._ready:
             self._sid = self._auth()
-        self._torrents = [item.get('name') for item in self._list()]
+            self._torrents = [item.get('name') for item in self._list()]
 
     def export(self):
         """Export the module data"""

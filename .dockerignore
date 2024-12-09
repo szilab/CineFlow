@@ -1,0 +1,8 @@
+/.github
+/.git
+/.vscode
+/data
+/rest
+/Dockerfile
+/pylintrc
+/.gitignore

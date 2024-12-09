@@ -15,8 +15,8 @@ class Config():  # pylint: disable=too-few-public-methods,too-many-instance-attr
     def __init__(self) -> None:
         self.data_dir = os.getenv('DATA_DIR', './config')
         self.library_dir = os.getenv('LIBRARY_DIR', './config')
-        self.retention = int(os.getenv('RETENTION')) or 90
-        self.interval = int(os.getenv('INTERVAL')) or 120
+        self.retention = int(os.getenv('RETENTION')) if os.getenv('RETENTION') else 90
+        self.interval = int(os.getenv('INTERVAL')) if os.getenv('INTERVAL') else 120
         self.twshows = bool(os.getenv('TWSHOWS'))
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         self.log_colors = bool(os.getenv('LOG_COLORS'))
