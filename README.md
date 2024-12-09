@@ -38,7 +38,7 @@ python3 main.py
 
 ## Contributing
 
-At the moment this project in the really early phase and still developed by original outhor only.
+At the moment this project in the really early phase and still developed by original author only.
 
 ## License
 
