@@ -23,16 +23,11 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN  }}
 
-    - name: Set up environment variables
-      run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
-
     - name: Extract metadata (tags, labels) for Docker
       id: metadata
       uses: docker/metadata-action@v3
       with:
-        images: ${{ env.DOCKER_NAMESPACE }}/${{ env.IMAGE_NAME }}
-        tags: |
-          type=raw,value=${{ env.BRANCH_NAME }}
+          images: ${{ env.DOCKER_NAMESPACE }}/${{ env.DOCKER_NAMESPACE }}
 
     - name: Build and push Docker image
       id: push
