@@ -23,11 +23,21 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN  }}
 
+    - name: Extract tag name
+      if: startsWith(github.ref, 'refs/tags/')
+      run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+    - name: Extract branch name (fallback for workflow_dispatch)
+      if: !startsWith(github.ref, 'refs/tags/')
+      run: echo "TAG_NAME=latest" >> $GITHUB_ENV
+
     - name: Extract metadata (tags, labels) for Docker
       id: metadata
       uses: docker/metadata-action@v3
       with:
-          images: my-docker-hub-namespace/my-docker-hub-repository
+        images: ${{ env.DOCKER_NAMESPACE }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=raw,value=${{ env.TAG_NAME }}
 
     - name: Build and push Docker image
       id: push
