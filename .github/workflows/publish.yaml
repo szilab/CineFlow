@@ -27,7 +27,7 @@ jobs:
       id: metadata
       uses: docker/metadata-action@v3
       with:
-          images: ${{ env.DOCKER_NAMESPACE }}/${{ env.DOCKER_NAMESPACE }}
+          images: ${{ vars.DOCKER_NAMESPACE }}/${{ vars.DOCKER_NAMESPACE }}
 
     - name: Build and push Docker image
       id: push
