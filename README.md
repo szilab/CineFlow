@@ -33,8 +33,8 @@ This project is a media management system that automates the collection of media
     - Items without a download link will be grayscale
     - Can add a colored border if a world is present in the tracker data, like resolution or language
 
-
 ![Jellyfin screenshot](docs/jellyfin_screen_1.png)
+
 
 ## Getting Started
 
@@ -106,6 +106,7 @@ $env:DATA_DIR="location_of_config.json"
 $env:LIBRARY_PATH="your_library_path"
 python3 main.py
 ```
+
 
 ## License
 
