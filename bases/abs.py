@@ -45,7 +45,12 @@ class ModuleBase(ABC, metaclass=SingletonMeta):
         else:
             log(f"{self.name()} does not support the '{phase.name}' phase")
 
-    def _is_required_config_set(self, names: list[str], category: str, exit_on_failure: bool = False) -> None:
+    def _is_required_config_set(
+        self,
+        names: list[str],
+        category: str,
+        exit_on_failure: bool = False
+    ) -> None:
         for name in names:
             if not cfg(name=name, category=category):
                 log(

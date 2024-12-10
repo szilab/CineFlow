@@ -1,7 +1,7 @@
 """App config module"""
 
 import os
-import os.path as path
+from os import path
 import sys
 import json
 from typing import Any
