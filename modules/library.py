@@ -19,7 +19,7 @@ class LibraryModule(ModuleBase):
         self._type = media_type.value
         self._limit = 100
         self._exported = []
-        self._data_dir = cfg(name='export_to', category='directory')
+        self._data_dir = cfg(name='path', category='library')
         if not self._data_dir:
             self._data_dir = Config().get_data_dir()
         self._library = Path(self._data_dir + "/" + self._type)

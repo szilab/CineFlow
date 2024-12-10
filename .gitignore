@@ -1,4 +1,5 @@
+/.vscode
 **/__pycache__
-data
-.vscode
-rest
+/data
+/rest
+/start.cmd

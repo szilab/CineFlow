@@ -40,7 +40,7 @@ class ModuleBase(ABC, metaclass=SingletonMeta):
             )
             return
         if function := getattr(self, phase.name.lower(), None):
-            log(f"Running {self.name()} module in the '{phase}' phase")
+            log(f"Running {self.name()} module in the '{phase.name}' phase")
             function()
         else:
             log(f"{self.name()} does not support the '{phase.name}' phase")

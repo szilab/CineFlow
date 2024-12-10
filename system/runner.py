@@ -41,7 +41,10 @@ class TaskRunner:
     def run_phase(self, phase: Phases):
         """Run a specific phase of the task runner."""
         for module in list_modules():
-            log(f"Running {module['name']} module")
-            module['class'](media_type=self._type).run(phase=phase)
-            log(f"Finished {module['name']} module")
+            if cfg(name='enabled', category=module['name']):
+                log(f"Running {module['name']} module")
+                module['class'](media_type=self._type).run(phase=phase)
+                log(f"Finished {module['name']} module")
+            else:
+                log(f"Skipping {module['name']} module as it is disabled")
         log(f"Finished {phase.name} phase")

@@ -47,8 +47,8 @@ class ImageHandler():
         if not self._metadata.get('link'):
             img = ImageOps.grayscale(img)
             log(f"Applied grayscale to image '{self._metadata.get('title')}'", level='DEBUG')
-        if cfg(name='rules', category='poster') and self._metadata.get('torrent'):
-            for rule in cfg(name='rules', category='poster'):
+        if cfg(name='rules', category='library') and self._metadata.get('torrent'):
+            for rule in cfg(name='rules', category='library'):
                 if '=' in rule:
                     match, color = rule.split('=')
                     if re.search(match, self._metadata.get('torrent').lower()):

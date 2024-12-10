@@ -26,7 +26,8 @@ class DownloaderModule(ModuleBase):
 
     def export(self):
         """Export the module data"""
-        for item in db().get_all(self._type):
+        all_items = db().get_all(self._type)
+        for item in all_items:
             if (
                 item.get('favorite') == 'true'
                 and

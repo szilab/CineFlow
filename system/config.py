@@ -71,7 +71,14 @@ class Config():
                 if e.startswith(f"{key.upper()}_"):
                     category = key
                     _, name = e.split('_', 1)
-                    self.config[category][name.lower()] = os.getenv(e)
+                    if os.getenv(e) == 'true':
+                        self.config[category][name.lower()] = True
+                    elif os.getenv(e) == 'false':
+                        self.config[category][name.lower()] = False
+                    elif os.getenv(e).isdigit():
+                        self.config[category][name.lower()] = int(os.getenv(e))
+                    else:
+                        self.config[category][name.lower()] = os.getenv(e)
 
     def _validate_and_apply_defaults(self, config: dict, schema: dict) -> None:
         validator = Draft7Validator(schema=schema)
