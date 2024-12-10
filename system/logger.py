@@ -2,7 +2,7 @@
 
 import threading
 from datetime import datetime
-from system.config import Config
+from system.config import cfg
 
 
 def log(*values, level: str = 'INFO'):
@@ -37,11 +37,11 @@ class Logger():
         return self._instances[self]
 
     def __init__(self):
-        if Config().log_level in LogLevels:
-            self._level = Config().log_level
+        if cfg(name='level', category='logging') in LogLevels:
+            self._level = cfg(name='level', category='logging')
         else:
             self._level = 'INFO'
-        self._colors = Config().log_colors
+        self._colors = cfg(name='colors', category='logging')
         self._lock = threading.Lock()
 
     def __should_log(self, level):

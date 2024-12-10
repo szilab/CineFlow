@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from bases.enums import MediaType, Phases
 from bases.utils import list_modules
 from system.logger import log
-from system.config import Config
+from system.config import cfg
 
 
 class TaskRunner:
@@ -25,7 +25,7 @@ class TaskRunner:
             now = datetime.now()
             if now > next_run:
                 self.execute()
-                next_run = now + timedelta(minutes=Config().interval)
+                next_run = now + timedelta(minutes=cfg(name='interval', category='refresh'))
 
     def stop(self):
         """Stop the task runner."""
@@ -36,10 +36,15 @@ class TaskRunner:
         for phase in Phases:
             log(f"Running {phase.name} phase")
             self.run_phase(phase=phase)
+        log(f"Task runner finished for all modules with '{self._type}' type")
 
     def run_phase(self, phase: Phases):
         """Run a specific phase of the task runner."""
         for module in list_modules():
-            log(f"Running {module['name']} module")
-            module['class'](media_type=self._type).run(phase=phase)
-            log(f"Finished {module['name']} module")
+            if cfg(name='enabled', category=module['name']):
+                log(f"Running {module['name']} module")
+                module['class'](media_type=self._type).run(phase=phase)
+                log(f"Finished {module['name']} module")
+            else:
+                log(f"Skipping {module['name']} module as it is disabled")
+        log(f"Finished {phase.name} phase")

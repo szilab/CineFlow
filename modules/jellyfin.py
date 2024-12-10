@@ -3,7 +3,7 @@
 from bases.abs import ModuleBase
 from bases.enums import MediaType
 from bases.utils import st
-from system.config import Config
+from system.config import cfg
 from system.database import Database as db
 from system.logger import log
 
@@ -15,19 +15,16 @@ class JellyfinModule(ModuleBase):
         self._name = "Jellyfin"
         self._type = media_type.value
         self._ready = self._is_required_config_set(
-            [
-                'JELLYFIN_KEY',
-                'JELLYFIN_LIBRARIES',
-                'JELLYFIN_USER'
-            ]
+            names=['key', 'url', 'libraries', 'user'],
+            category='jellyfin'
         )
         self._req = self._init(
-            url=Config().jellyfin_url
+            url=cfg(name='url', category='jellyfin')
         )
         if self._ready:
             self._favs = []
             self._user_id = self._get_user_id()
-            self._library_id = self._get_library_id(Config().jellyfin_libraries)
+            self._library_id = self._get_library_id(cfg(name='libraries', category='jellyfin'))
 
     def collect(self):
         """Collect existing items from Jellyfin server."""
@@ -55,7 +52,7 @@ class JellyfinModule(ModuleBase):
 
     def _collect(self, in_library: bool = True) -> list:
         params = {
-            "ApiKey": Config().jellyfin_key,
+            "ApiKey": cfg(name='key', category='jellyfin'),
             "fields": "OriginalTitle,ParentId",
             "Recursive": "true",
             "includeItemTypes": self._type
@@ -105,7 +102,7 @@ class JellyfinModule(ModuleBase):
         response = self._req.get(
             endpoint=f"Users/{self._user_id}/Items",
             params={
-                "ApiKey": Config().jellyfin_key,
+                "ApiKey": cfg(name='key', category='jellyfin'),
                 "IsFavorite": "true",
                 "Recursive": "true",
                 "includeItemTypes": self._type
@@ -115,9 +112,12 @@ class JellyfinModule(ModuleBase):
         return [item.get('Id') for item in response.data or []]
 
     def _get_user_id(self):
-        response = self._req.get(endpoint="Users", params={"ApiKey": Config().jellyfin_key})
+        response = self._req.get(
+            endpoint="Users",
+            params={"ApiKey": cfg(name='key', category='jellyfin')}
+        )
         for user in response.data or []:
-            if user.get("Name") == Config().jellyfin_user:
+            if user.get("Name") == cfg(name='user', category='jellyfin'):
                 return user.get("Id")
         log(
             "Failed to get UserId for user 'JELLYFIN_USER', "
@@ -130,7 +130,7 @@ class JellyfinModule(ModuleBase):
     def _get_library_id(self, libraries: str) -> bool:
         response = self._req.get(
             endpoint="Library/MediaFolders",
-            params={"ApiKey": Config().jellyfin_key},
+            params={"ApiKey": cfg(name='key', category='jellyfin')},
             key="Items"
         )
         resp_names = []

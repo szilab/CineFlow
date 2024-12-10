@@ -3,7 +3,7 @@
 from bases.abs import ModuleBase
 from bases.enums import MediaType
 from bases.utils import st
-from system.config import Config
+from system.config import cfg
 from system.database import Database as db
 from system.logger import log
 
@@ -14,9 +14,12 @@ class TmdbModule(ModuleBase):
     def __init__(self, media_type: MediaType):
         self._name = "TMDb"
         self._type = media_type.value
-        self._limit = 20
+        self._limit = cfg(name='limit', category='modules')
         self._imageurl = "https://image.tmdb.org/t/p/original"
-        self._ready = self._is_required_config_set(['TMDB_KEY'])
+        self._ready = self._is_required_config_set(
+            names=['key'],
+            category='tmdb'
+        )
         self._req = self._init(
             url="https://api.themoviedb.org/3",
         )
@@ -48,11 +51,11 @@ class TmdbModule(ModuleBase):
                 st(string) + ',' in st(aliases)
             )
 
-        for lang in [Config().tmdb_lang, "en-US"]:
+        for lang in [cfg(name='lang', category='tmdb'), "en-US"]:
             response = self._req.get(
                 endpoint=f"search/{self._type}",
                 params={
-                    "api_key": Config().tmdb_key,
+                    "api_key": cfg(name='key', category='tmdb'),
                     "query": title,
                     "year": year,
                     "language": lang
@@ -73,7 +76,11 @@ class TmdbModule(ModuleBase):
         for page in range(1, 20):
             chunk = self._req.get(
                 endpoint=f"{self._type}/popular",
-                params={"api_key": Config().tmdb_key, "page": page, "language": Config().tmdb_lang},
+                params={
+                    "api_key": cfg(name='key', category='tmdb'),
+                    "page": page,
+                    "language": cfg(name='lang', category='tmdb')
+                },
                 key="results"
             )
             data.extend(chunk.data)

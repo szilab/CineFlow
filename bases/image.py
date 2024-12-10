@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 import requests
 from PIL import Image, ImageOps, UnidentifiedImageError
-from system.config import Config
+from system.config import cfg
 from system.logger import log
 
 
@@ -47,8 +47,8 @@ class ImageHandler():
         if not self._metadata.get('link'):
             img = ImageOps.grayscale(img)
             log(f"Applied grayscale to image '{self._metadata.get('title')}'", level='DEBUG')
-        if Config().border_rules and self._metadata.get('torrent'):
-            for rule in Config().border_rules.split(';'):
+        if cfg(name='rules', category='library') and self._metadata.get('torrent'):
+            for rule in cfg(name='rules', category='library'):
                 if '=' in rule:
                     match, color = rule.split('=')
                     if re.search(match, self._metadata.get('torrent').lower()):
