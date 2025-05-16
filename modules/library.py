@@ -1,78 +1,58 @@
-"""Library module for media server"""
+"""This module provides a class to handle directories."""
 
-import shutil
-from pathlib import Path
-from bases.abs import ModuleBase
-from bases.enums import MediaType
-from bases.utils import sort_data
-from bases.image import ImageHandler
-from system.config import cfg, Config
-from system.database import Database as db
 from system.logger import log
+from system.image import ImageHandler
+from bases.data import MediaData
+from bases.module import LibraryBase
 
 
-class LibraryModule(ModuleBase):
-    """Library module for media server"""
+class LibraryData(MediaData):  # pylint: disable=too-few-public-methods
+    """Library data."""
 
-    def __init__(self, media_type: MediaType):
-        self._name = "Library"
-        self._type = media_type.value
-        self._limit = 100
-        self._exported = []
-        self._data_dir = cfg(name='path', category='library')
-        if not self._data_dir:
-            self._data_dir = Config().get_data_dir()
-        self._library = Path(self._data_dir + "/" + self._type)
-        self._library.mkdir(parents=True, exist_ok=True)
-        self._ready = self._library.exists()
+    def __init__(self, **kwargs) -> None:
+        self.folder = ''
+        self.image = ''
+        super().__init__(**kwargs)
 
-    def export(self):
-        """Export media items to library"""
-        all_rows = sort_data(data=db().get_all(self._type), param='updated_at', reverse=True)
-        self._exported = []
-        for item in all_rows:
-            if item.get('collected') != 'false':
-                if item.get('title') and item.get('poster'):
-                    name = item.get('title') + " (" + item.get('year') + ")"
-                    folder = Path(self._library / name)
-                    self._export_video(folder=folder, name=name)
-                    self._export_poster(item=item, folder=folder)
-                    if len(self._exported) >= self._limit:
-                        break
-                else:
-                    log(
-                        f"Skipping item export {item.get('title')} due to missing data",
-                        level='WARNING'
-                    )
-            else:
-                log(
-                    f"Skipping item export {item.get('title')} due to already "
-                    "available in media server",
-                    level='DEBUG'
-                )
-        for f in self._library.iterdir():
-            self._rm(folder=f)
+class Library(LibraryBase):
+    """
+    Module to handle media library.
 
-    def _export_video(self, folder: Path, name: str):
-        self._exported.append(name)
-        if not folder.exists():
-            log(f"Exported {name} to {self._library}", level='DEBUG')
-            self._create_dir(folder=folder)
-            self._create_video(folder=folder)
+    Configuration:
+        - path: path to the media library (required)
+        - limit: number of maximum items in library (default: 50)
 
-    def _create_video(self, folder: Path):
-        video = folder / f"{folder.name.replace(' ', '_')}.mkv"
-        if not video.exists():
-            video.touch()
+    Functions:
+        - put: import media to the library
+        - find: find media in the library
+    """
 
-    def _create_dir(self, folder: Path):
-        if not folder.exists():
-            folder.mkdir(parents=True)
+    def __init__(self, config: dict = {}) -> None:  # pylint: disable=dangerous-default-value
+        """Initialize the library module."""
+        super().__init__(config=config)
 
-    def _export_poster(self, item: dict, folder: Path):
-        ImageHandler(metadata=item).save(folder=folder)
-
-    def _rm(self, folder: Path):
-        if folder.is_dir() and folder.name not in self._exported:
-            shutil.rmtree(folder)
-            log(f"Removed {folder} from {self._library}", level='DEBUG')
+    def put(self, data: list) -> None:
+        """Import the media to the library."""
+        self.ready()
+        if not self._ready:
+            return
+        for item in data or []:
+            if not isinstance(item, dict):
+                continue
+            if not item.get('title') or not item.get('year'):
+                log(f"Invalid item: {item}", level='WARNING')
+                continue
+            self._handler.make(
+                directory=f"{item['title']} ({item['year']})",
+                file=f"{item.get('title')}.mkv"
+            )
+            if not item.get('poster'):
+                log(f"Item '{item['title']}' has no poster.", level='DEBUG')
+                continue
+            img = ImageHandler(url=item.get('poster'))
+            img.save(
+                path=self._handler.path,
+                directory=self._handler.fix(f"{item['title']} ({item['year']})")
+            )
+            log(f"Item '{item['title']}' imported successfully.", level='DEBUG')
+        self.cleanup()

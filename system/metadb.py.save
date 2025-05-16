@@ -1,0 +1,77 @@
+"""TMDB handler"""
+
+from system.logger import log
+from system.config import cfg
+from system.database import Database
+from lib.enums import MediaType
+from system.request import RequestHandler
+from lib.dclasses import Media
+
+
+class MetaDB():
+    """TMDB metadata finder."""
+
+    @staticmethod
+    def search(title: str, year: str, type: MediaType) -> Media:  # pylint: disable=redefined-builtin
+        """Search for media in TMDB."""
+        if media := Database().get_media(title, year):
+            return media
+        log(f"Searching for '{title}' ({year})", level="DEBUG")
+        handler = RequestHandler(url="https://api.themoviedb.org/3")
+        response = handler.get(
+            endpoint=f"/search/{type.value}",
+            params={
+                'api_key': str(cfg("tmdb.key")),
+                'language': str(cfg("language", default="en-US")),
+                'query': title,
+                'year': year,
+            }
+        )
+        if not response or not response.data:
+            return None
+        for item in response.data['results'] or []:
+            for year_field in ['release_date', 'first_air_date']:
+                for title_field in ['title', 'original_title', 'name']:
+                    item_year = item.get(year_field, "")[0:4]
+                    item_title = item.get(title_field, "").lower()
+                    if item_year == year and title.lower() == item_title:
+                        return MetaDB.metadata_map(data=item)
+        log(f"Not found '{title}' ({year})", level="DEBUG")
+        return None
+
+    @staticmethod
+    def metadata_map(data: dict) -> Media:
+        """Map the TMDB metadata to a media object."""
+        if not data:
+            return None
+        media = Media()
+        if 'release_date' in data:
+            media.type = MediaType.MOVIE
+        else:
+            media.type = MediaType.SHOW
+        media.title = data.get('title', data.get('original_title', data.get('name', "")))
+        media.year = str(data.get('release_date', "") or data.get('first_air_date', ""))[0:4]
+        media.poster = "https://image.tmdb.org/t/p/original" + data.get('poster_path', '')
+        media.db_id = data.get('id')
+        if not media.db_id or not media.title or not media.year:
+            log(f"Failed to parse metadata for '{media.title}' ({media.year})", level="WARNING")
+            return None
+        Database().add_media(media)
+        log(f"Metadata found '{media.title}' ({media.year})", level="DEBUG")
+        return media
+
+    @staticmethod
+    def get(endpoint: str, params: dict = None) -> dict:
+        """Get data from TMDB API."""
+        handler = RequestHandler(url="https://api.themoviedb.org/3")
+        response = handler.get(
+            endpoint=endpoint,
+            params={
+                'api_key': str(cfg("tmdb.key")),
+                'language': str(cfg("language", default="en-US")),
+                **(params or {}),
+            }
+        )
+        if not response or not response.data:
+            return None
+        return response.data

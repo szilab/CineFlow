@@ -1,0 +1,92 @@
+"""Base class for API consumer clients."""
+
+import sys
+from abc import abstractmethod
+from bases.singleton import SingletonMeta
+from bases.worker import WorkerBase
+from bases.mapper import MapperBase
+from system.logger import log
+from system.config import cfg
+from system.database import Database
+from system.request import RequestHandler
+from lib.enums import MediaType
+from lib.dclasses import Media
+
+
+class ConsumerBase(WorkerBase, metaclass=SingletonMeta):
+    """Consumer base class"""
+
+    def __init__(self, url: str = None, delay: int = 60) -> None:
+        """Initialize the consumer."""
+        super().__init__(delay=delay)
+        self.limits = {MediaType.MOVIE: 20, MediaType.SHOW: 10}
+        self.collected = {MediaType.MOVIE: [], MediaType.SHOW: []}
+        self.handler = RequestHandler(url=url)
+        self.thandler = RequestHandler(url="https://api.themoviedb.org/3")
+        self._init_tmdb()
+
+    def _init_tmdb(self) -> None:
+        """Initialize the TMDB API."""
+        self.thandler.headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json;charset=utf-8',
+        }
+        if not cfg("tmdb.key"):
+            log("Missing mandatory configuration TMDB token.", level="WARNING")
+            sys.exit(1)
+        self.thandler.params = {
+            'api_key': str(cfg("tmdb.key")),
+            'language': str(cfg("language", default="en-US")),
+        }
+
+    def find_data(self, title: str, year: str, type: MediaType) -> Media:  # pylint: disable=redefined-builtin
+        """Search for media in TMDB."""
+        if media := Database().get_media(title, year):
+            return media
+        log(f"Searching for '{title}' ({year})", level="DEBUG")
+        response = self.thandler.get(
+            endpoint=f"/search/{type.value}",
+            params={'query': title, 'year': year,}
+        )
+        media = self._find_matching(results=response.data['results'], title=title, year=year)
+        if not media:
+            log(f"Not found '{title}' ({year})", level="DEBUG")
+            return None
+        return media
+
+    def map_data(self, data: dict) -> Media:
+        """Map the data to a media object."""
+        if not data:
+            return None
+        media = TMDBMapper(data).media
+        Database().add_media(media)
+        return media
+
+    def _find_matching(self, results: list, title: str, year: str) -> dict:
+        """Return the first matching media."""
+        for item in results:
+            for year_field in TMDBMapper.year_fields:
+                if year == item.get(year_field, "")[0:4]:
+                    for title_field in TMDBMapper.title_fields:
+                        if title.lower() == item.get(title_field, "").lower():
+                            media = self.map_data(item)
+                            Database().add_media(media)
+                            log(f"Found '{title}' ({year})", level="DEBUG")
+                            return item
+        return None
+
+    @abstractmethod
+    def collector(self, type: MediaType) -> None:  # pylint: disable=redefined-builtin
+        """"Task to be executed by the consumer."""
+
+    @abstractmethod
+    def search(self, title: str, year: str, type: MediaType) -> Media:  # pylint: disable=redefined-builtin
+        """Search for media."""
+        if not self.ready():
+            return None
+
+    def task(self) -> None:
+        """Worker thread for the consumer."""
+        log(f"Starting collector task for {self.name}", level="INFO")
+        for media_type in MediaType:
+            self.collector(media_type)

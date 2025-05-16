@@ -1,101 +1,69 @@
-"""App config module"""
+"""Config module"""
 
 import os
-from os import path
-import sys
-import json
-from typing import Any
-from jsonschema import Draft7Validator
+import threading
+from pathlib import Path
+
+import yaml
+from bases.singleton import SingletonMeta
 
 
-def cfg(name: str, category: str, value: Any = None) -> str:
-    """Shortcut for Config get and set"""
+def cfg(key: str, value=None, default=None):
+    """Get/Set a configuration value"""
     if value is not None:
-        Config().set(name=name, category=category, value=value)
-        return value
-    return Config().get(name, category)
+        Config().set(key, value)
+    return Config().get(key, default)
 
 
-class Config():
-    """App configuration"""
-    _instances = {}
+class Config(metaclass=SingletonMeta):
+    """Manage configuration values"""
 
-    def __call__(self, *args, **kwargs):
-        if self not in self._instances:
-            self._instances[self] = super(Config, self).__call__(*args, **kwargs)  # pylint: disable=no-member
-        return self._instances[self]
+    def __init__(self):
+        self._file = os.environ.get("DATA_DIRECTORY" ,"/data") + "/config.yaml"
+        self._lock = threading.Lock()
+        self._mandatory = []
+        if not os.path.exists(self._file):
+            Path(self._file).parent.mkdir(parents=True, exist_ok=True)
+            Path(self._file).touch()
 
-    def __init__(self) -> None:
-        self._data_dir = os.getenv('DATA_DIR', '/data')
-        self._app_dir = path.dirname(path.dirname(__file__))
+    def _load(self) -> dict:
+        """Load configuration"""
+        with open(self._file, mode="r", encoding='UTF-8') as file:
+            config = yaml.safe_load(file)
+        return config or {}
 
-        self._schema_file = f"{self._app_dir}/schema.json"
-        self._config_file = f"{self._data_dir}/config.json"
-        self.config = {}
+    def _save(self, data: dict):
+        """Save configuration"""
+        with open(self._file, mode="w", encoding='UTF-8') as file:
+            yaml.safe_dump(data, file, default_flow_style=False, allow_unicode=True)
 
-        with open(self._schema_file, 'r', encoding='UTF-8') as f:
-            schema = json.load(f)
-        if os.path.exists(self._config_file):
-            with open(self._config_file, 'r', encoding='UTF-8') as f:
-                config = json.load(f)
-        else:
-            config = {}
-        self._validate_and_apply_defaults(config=config, schema=schema)
-        self._overwrite_from_env()
+    def get(self, key: str, default=None):
+        """Get a configuration value"""
+        if key.capitalize() in os.environ:
+            return os.environ[key.capitalize()]
+        with self._lock:
+            config = self._load()
+            if key in config:
+                return config[key]
+            for current_key in key.split("."):
+                if current_key in config:
+                    config = config[current_key]
+                else:
+                    config = None
+                    break
+        return config or default
 
-    def get_data_dir(self) -> str:
-        """Get data directory"""
-        return self._data_dir
-
-    def get(self, name: str, category: str) -> str:
-        """Get config value"""
-        if category in self.config:
-            return self.config[category].get(name, None)
-        return None
-
-    def set(self, name: str, category: str, value: Any) -> None:
-        """Set config value"""
-        if category not in self.config:
-            self.config[category] = {}
-        self.config[category][name] = value
-        self._save()
-
-    def _save(self) -> None:
-        with open(f"{self._data_dir}/config.json", 'w', encoding='UTF-8') as f:
-            f.write(json.dumps(self.config, indent=4))
-
-    def _overwrite_from_env(self) -> None:
-        """Overwrite config from environment variables"""
-        for key in self.config.keys():
-            for e in os.environ:
-                if e.startswith(f"{key.upper()}_"):
-                    category = key
-                    _, name = e.split('_', 1)
-                    if os.getenv(e) == 'true':
-                        self.config[category][name.lower()] = True
-                    elif os.getenv(e) == 'false':
-                        self.config[category][name.lower()] = False
-                    elif os.getenv(e).isdigit():
-                        self.config[category][name.lower()] = int(os.getenv(e))
-                    else:
-                        self.config[category][name.lower()] = os.getenv(e)
-
-    def _validate_and_apply_defaults(self, config: dict, schema: dict) -> None:
-        validator = Draft7Validator(schema=schema)
-        for error in sorted(validator.iter_errors(config), key=lambda e: e.path):
-            print(f"Config validation error: {error.message} at {list(error.path)}")
-            sys.exit(1)
-        self.config = self._apply_defaults(instance=config, schema=schema)
-
-    @staticmethod
-    def _apply_defaults(instance: dict, schema: dict) -> dict:
-        """recursively apply defaults to instance"""
-        if "properties" in schema:
-            for key, value in schema["properties"].items():
-                if key not in instance and "default" in value:
-                    instance[key] = value.get("default")
-                if "properties" in value:
-                    instance[key] = Config._apply_defaults(instance.get(key, {}), value)
-        if "default" in schema:
-            instance = schema.get("default")
-        return instance
+    def set(self, key: str, value):
+        """Set a configuration value"""
+        with self._lock:
+            config = self._load()
+            if '.' not in key:
+                config[key] = value
+            else:
+                leaf = config
+                for current_key in key.split(".")[:-1]:
+                    if current_key not in leaf:
+                        leaf[current_key] = {}
+                    leaf = leaf[current_key]
+                leaf[key.split(".")[-1]] = value
+            self._save(config)

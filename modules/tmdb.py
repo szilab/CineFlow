@@ -1,119 +1,87 @@
-"""TMDb module for collecting metadata from The Movie Database API."""
+"""TMDB API consumer class"""
 
-from bases.abs import ModuleBase
-from bases.enums import MediaType
-from bases.utils import st
+from typing import List, Dict
 from system.config import cfg
-from system.database import Database as db
-from system.logger import log
+from bases.data import MediaData
+from bases.module import ConsumerBase
 
 
-class TmdbModule(ModuleBase):
-    """TMDb module for collecting metadata from The Movie Database API."""
+class TmdbData(MediaData):  # pylint: disable=too-few-public-methods
+    """TMDB data."""
 
-    def __init__(self, media_type: MediaType):
-        self._name = "TMDb"
-        self._type = media_type.value
-        self._limit = cfg(name='limit', category='modules')
-        self._imageurl = "https://image.tmdb.org/t/p/original"
-        self._ready = self._is_required_config_set(
-            names=['key'],
-            category='tmdb'
+    def __init__(self, data: dict = {}, **kwargs) -> None:  # pylint: disable=dangerous-default-value
+        super().__init__(data=data, **kwargs)
+        self.data = {
+            'poster': '',
+            **self.data,
+        }
+        self._mappings = {
+            'title': ['original_title', 'name'],
+            'year': ['release_date', 'first_air_date'],
+            'kind': ['media_type'],
+            'poster': ['poster_path'],
+        }
+        self._transforms = {
+            "year": lambda x: int(str(x)[0:4]),
+            "poster": lambda x: f"https://image.tmdb.org/t/p/original{x}",
+        }
+
+class Tmdb(ConsumerBase):
+    """
+    TMDB API consumer module
+    Configuration:
+        - token: TMDB API token (required)
+        - kind: media type: movie, tv (default: movie)
+        - limit: number of items to collect (default: 20)
+        - params: additional parameters for the API request (optional)
+
+    Functions:
+        - get: get media from TMDB API return list of media
+        - search: search for media in TMDB API return the match or None
+    """
+
+    def __init__(self, config: dict = {}) -> None:  # pylint: disable=dangerous-default-value
+        """Initialize the TMDB consumer."""
+        super().__init__(url="https://api.themoviedb.org/3", config=config)
+        self._req_module_cfgs = ['token']
+
+    def ready(self) -> None:
+        """Check if the TMDB module is ready."""
+        super().ready()
+        self._handler.params = {
+            'api_key': self._cfg.get('token'),
+            'language': cfg("language", default="en-US"),
+        }
+
+    def get(self, data: list = []) -> List[dict]:  # pylint: disable=dangerous-default-value
+        """Collect media from the TMDB API."""
+        self.ready()
+        if not self._ready:
+            return [*data]
+        collected = []
+        while len(collected) < self._limit:
+            response = self._handler.get(
+                endpoint=f"/trending/{self._kind}/week",
+                params=self._cfg.get('params', {})
+            )
+
+            for item in response.data.get('results') or []:
+                if media := TmdbData(kind=self._kind).map(item=item):
+                    collected.append(media)
+                    if len(collected) >= self._limit:
+                        return collected
+        return [*data, *collected]
+
+    def search(self, title: str, year: int) -> Dict:
+        """Search for media in TMDB."""
+        self.ready()
+        if not self._ready:
+            return []
+        response = self._handler.get(
+            endpoint=f"/search/{self._kind}",
+            params={'query': title, 'year': year}
         )
-        self._req = self._init(
-            url="https://api.themoviedb.org/3",
-        )
-
-    def collect(self):
-        """Collect popular media items from TMDb API."""
-        data = self._collect()
-        log(f"Collected {len(data)} popular {self._type}s from {self._name}")
-        for metadata in data:
-            self._to_db(metadata)
-
-    def search(self):
-        """Search and update metadata for media items in database."""
-        all_rows = db().get_all(self._type)
-        for item in all_rows:
-            metadata = self._search(
-                title=item['title'],
-                year=item['year'],
-                aliases=item['aliases']
-            )
-            if metadata:
-                self._to_db(metadata)
-
-    def _search(self, title: str, year: str, aliases: str = '') -> list:
-        def _is_in_title(string, title, aliases):
-            return (
-                st(string) == st(title)
-                or
-                st(string) + ',' in st(aliases)
-            )
-
-        for lang in [cfg(name='lang', category='tmdb'), "en-US"]:
-            response = self._req.get(
-                endpoint=f"search/{self._type}",
-                params={
-                    "api_key": cfg(name='key', category='tmdb'),
-                    "query": title,
-                    "year": year,
-                    "language": lang
-                },
-                key="results"
-            )
-            for result in response.data:
-                if result.get('release_date')[:4] == year:
-                    if _is_in_title(result.get('title'), title, aliases):
-                        return result
-                    if _is_in_title(result.get('original_title'), title, aliases):
-                        return result
-        log(f"Could not identify '{title} ({year})' with TMDb", level='DEBUG')
-        return None
-
-    def _collect(self):
-        data = []
-        for page in range(1, 20):
-            chunk = self._req.get(
-                endpoint=f"{self._type}/popular",
-                params={
-                    "api_key": cfg(name='key', category='tmdb'),
-                    "page": page,
-                    "language": cfg(name='lang', category='tmdb')
-                },
-                key="results"
-            )
-            data.extend(chunk.data)
-            if len(data) >= self._limit:
-                break
-        return data[:self._limit]
-
-    def _to_db(self, metadata: dict):
-        db().add(
-            table=self._type,
-            title=st(self._media_title(metadata)),
-            year=self._media_year(metadata),
-            alias=st(self._media_alias(metadata)),
-            poster=self._media_poster(metadata),
-            tmdb=metadata.get('id'),
-            backdrop=metadata.get('backdrop_path'),
-            overview=metadata.get('overview'),
-        )
-
-    def _media_title(self, metadata: dict) -> None:
-        if metadata.get('original_title'):
-            return metadata.get('original_title')
-        return metadata.get('title')
-
-    def _media_year(self, metadata: dict) -> None:
-        return metadata.get('release_date')[:4]
-
-    def _media_alias(self, metadata: dict) -> None:
-        if self._media_title(metadata) != metadata.get('title'):
-            return metadata.get('title')
-        return ""
-
-    def _media_poster(self, metadata: dict) -> None:
-        if metadata.get('poster_path'):
-            return self._imageurl + str(metadata.get('poster_path'))
-        return ""
+        if not response.data or not response.data.get('results'):
+            return None
+        results = [TmdbData(kind=self._kind).map(item=item) for item in response.data['results']]
+        return self._match(results=results, title=title, year=year, kind=self._kind)
