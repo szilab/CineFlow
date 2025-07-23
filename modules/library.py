@@ -1,18 +1,12 @@
 """This module provides a class to handle directories."""
 
+from typing import List, Dict
+from PIL import Image
 from system.logger import log
+from system.misc import evaluate
 from system.image import ImageHandler
-from bases.data import MediaData
 from bases.module import LibraryBase
 
-
-class LibraryData(MediaData):  # pylint: disable=too-few-public-methods
-    """Library data."""
-
-    def __init__(self, **kwargs) -> None:
-        self.folder = ''
-        self.image = ''
-        super().__init__(**kwargs)
 
 class Library(LibraryBase):
     """
@@ -21,38 +15,87 @@ class Library(LibraryBase):
     Configuration:
         - path: path to the media library (required)
         - limit: number of maximum items in library (default: 50)
+        - age: maximum age of items in library in days (default: 30)
 
     Functions:
         - put: import media to the library
         - find: find media in the library
     """
 
-    def __init__(self, config: dict = {}) -> None:  # pylint: disable=dangerous-default-value
+    def __init__(self, config: dict = None) -> None:
         """Initialize the library module."""
-        super().__init__(config=config)
+        super().__init__(config=config, required=['directory'])
+        self.mappings = {
+            'directory': ['directory'],
+            'title': ['directory'],
+            'year': ['directory'],
+            'tmdbid': ['directory'],
+        }
+        self.transforms = {
+            'title': lambda x: x.split(' (')[0].strip(),
+            'year': lambda x: x.split(' (')[1].split(')')[0],
+            'tmdbid': self._get_tmdbid,
+        }
 
-    def put(self, data: list) -> None:
+    def get(self) -> List[Dict]:
+        """Get the list of items in the library."""
+        results = []
+        directories = self._handler.all()
+        for directory in directories:
+            if '(' not in directory.name or ')' not in directory.name:
+                log(f"Item '{directory.name}' does not have a valid name format.", level='WARNING')
+                continue
+            results.append({'directory': directory.name})
+        log(f"Items in library: '{len(results)}'")
+        return [self.map(item=item) for item in results]
+
+    def put(self, data: List[Dict]) -> None:
         """Import the media to the library."""
-        self.ready()
-        if not self._ready:
-            return
-        for item in data or []:
-            if not isinstance(item, dict):
+        for media in data or []:
+            item = self._item_name(media=media)
+            if media.get('poster'):
+                image = self._create_poster(media=media)
+            else:
+                image = None
+                log(f"Item '{media['title']}' has no poster.", level='WARNING')
+            self._handler.make(item=item, image=image)
+
+    def remove(self, data: List[Dict]) -> None:
+        """Remove the media from the library."""
+        for media in data or []:
+            item = self._item_name(media=media)
+            self._handler.remove(item=item)
+
+    def _item_name(self, media: dict) -> str:
+        """Generate a library item name for the media."""
+        if media.get('tmdbid'):
+            return media['title'] + " (" + str(media['year']) + f") [tmdbid-{media['tmdbid']}]"
+        return media['title'] + " (" + str(media['year']) + ")"
+
+    def _get_tmdbid(self, directory: dict) -> str:
+        """Extract TMDB ID from the directory name."""
+        if '[tmdbid-' in directory and ']' in directory:
+            return directory.split('[tmdbid-')[1].replace(']', '').strip()
+        return None
+
+    def _create_poster(self, media: dict) -> Image.Image:
+        """Create a poster for the item."""
+        img = ImageHandler(url=media.get('poster'))
+        if not img:
+            log(f"Failed to load image for item '{media['title']}'.")
+            return None
+        if not self.cfg('rules'):
+            log("No modification rules to apply to the library images.")
+            return None
+        for rule in self.cfg('rules'):
+            if not isinstance(rule, dict) or not rule.get('property'):
+                log(f"Invalid library modification: {rule}", level='WARNING')
                 continue
-            if not item.get('title') or not item.get('year'):
-                log(f"Invalid item: {item}", level='WARNING')
-                continue
-            self._handler.make(
-                directory=f"{item['title']} ({item['year']})",
-                file=f"{item.get('title')}.mkv"
-            )
-            if not item.get('poster'):
-                log(f"Item '{item['title']}' has no poster.", level='DEBUG')
-                continue
-            img = ImageHandler(url=item.get('poster'))
-            img.save(
-                path=self._handler.path,
-                directory=self._handler.fix(f"{item['title']} ({item['year']})")
-            )
-            log(f"Item '{item['title']}' imported successfully.", level='DEBUG')
-        self.cleanup()
+            if evaluate(
+                left=media.get(rule.get('property')),
+                right=rule.get('value'),
+                expression=rule.get('expression', 'exists'),
+                wcase=rule.get('case_sensitive', True)
+            ):
+                img.apply_from_rule(rule=rule)
+        return img
