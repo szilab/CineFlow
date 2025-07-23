@@ -2,101 +2,117 @@
 
 import os
 import shutil
+import time
+import re
+from pathlib import Path
+from system.image import ImageHandler
 from system.logger import log
+from system.misc import sanitize_name
+from bases.worker import WorkerBase
 
 
-class DirectoryHandler:
+class DirectoryHandler(WorkerBase):
     """Directory handler class."""
+    DEFAULT_MIN_ITEM_AGE = 30
+    DEFAULT_MIN_ITEM_COUNT = 10
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, directory: str) -> None:
         """Initialize the directory handler."""
-        self.path = path
-        if path:
-            try:
-                os.makedirs(self.path, exist_ok=True)
-                if self.usable():
-                    log(f"Directory '{self.path}' initialized successfully.", level='DEBUG')
-            except OSError as e:
-                log(f"Error creating directory '{self.path}': {e}", level='WARNING')
-
-    def usable(self) -> bool:
-        """Check if the directory is usable."""
-        if not self.path:
-            log("Directory path is empty.", level='WARNING')
-            return False
-        if os.path.isdir(self.path) and os.access(self.path, os.W_OK):
-            return True
-        log(f"Directory '{self.path}' is not usable.", level='WARNING')
-        return False
+        super().__init__()
+        self._max_item_age = self.DEFAULT_MIN_ITEM_AGE
+        self._max_item_count = self.DEFAULT_MIN_ITEM_COUNT
+        if not directory:
+            raise ValueError("Directory name must be provided.")
+        self._path = Path(os.environ.get("EXPORT_DIRECTORY", "/library")).resolve() / directory
+        if self._path.exists() and not self._path.is_dir():
+            raise ValueError(f"Directory path '{self._path}' exists but is not a directory.")
+        try:
+            self._path.mkdir(parents=True, exist_ok=True)
+            if not os.access(self._path, os.W_OK):
+                raise ValueError(f"Directory path '{self._path}' is not writable.")
+        except OSError as e:
+            raise ValueError(f"Error creating directory '{self._path}': {e}") from e
+        self.start()
 
     def all(self) -> list:
-        """Get the list of all directories in library."""
-        if not self.usable():
-            return []
+        """Get the list of items in directory."""
         try:
             directories = []
-            for d in os.listdir(self.path):
-                if os.path.isdir(os.path.join(self.path, d)):
-                    directories.append(os.path.join(self.path, d))
-            log(f"Directories in library: '{len(directories)}'", level='DEBUG')
+            for d in self._path.iterdir():
+                if d.is_dir():
+                    directories.append(d)
             return directories
         except OSError as e:
-            log(f"Error listing directories: {e}", level='WARNING')
-            return []
+            log(f"Error listing items: {e}", level='WARNING')
+        return []
 
-    def fix(self, name: str, strict: bool = False) -> tuple[str, str]:
-        """Fix the paths in the library."""
-        name = name.replace(':', '').replace('?', '').replace('/', '').replace(':', '')
-        name = name.replace('*', '')
-        if strict:
-            name = name.lower().replace(' ', '_')
-        return name
-
-    def dir_path(self, directory: str) -> str:
-        """Get the directory path."""
-        if directory.startswith(self.path):
-            return directory
-        return os.path.join(self.path, self.fix(directory))
-
-    def file_path(self, directory: str, file: str) -> str:
-        """Get the file path."""
-        directory_path = self.dir_path(directory)
-        if file.startswith(self.path):
-            return file
-        return os.path.join(directory_path, self.fix(file, strict=True))
-
-    def make(self, directory: str, file: str = None) -> bool:
-        """Make a directory and file."""
-        if not self.usable():
-            return False
+    def make(self, item: str, image: ImageHandler = None) -> bool:
+        """Make an item and file."""
+        item = sanitize_name(item)
+        file = re.split(r'[\(\[]', item, maxsplit=1)[0].strip() + '.mkv'
         try:
-            directory_path = self.dir_path(directory)
-            if not os.path.exists(directory_path):
-                os.makedirs(directory_path, exist_ok=True)
-                log(f"Directory '{directory}' created successfully.", level='DEBUG')
-            if file:
-                file_path = self.file_path(directory, file)
-                if not os.path.exists(file_path):
-                    with open(file=file_path, mode='w', encoding='UTF-8') as f:
-                        f.write('')
-                    log(f"File '{file}' created successfully.", level='DEBUG')
+            if not Path.exists(self._path / item):
+                os.makedirs(self._path / item, exist_ok=True)
+                log(f"Item '{item}' created successfully.")
+            Path(self._path / item / file).touch(exist_ok=True)
+            if image:
+                image.save(str(self._path / item))
+                log(f"Image for item '{item}' saved successfully.")
+            return True
+        except (OSError, ValueError) as e:
+            log(f"Failed to create: {e}", level='WARNING')
+        return False
+
+    def remove(self, item: str) -> bool:
+        """Remove an item."""
+        item = sanitize_name(item)
+        try:
+            shutil.rmtree(self._path / item)
+            log(f"Item '{item}' removed successfully.")
             return True
         except OSError as e:
-            log(f"Error creating: {e}", level='WARNING')
-            return False
+            log(f"Failed to removing: {e}", level='WARNING')
+        return False
 
-    def remove(self, directory: str) -> bool:
-        """Remove a directory."""
-        if not self.usable():
-            return False
-        try:
-            if directory.startswith(self.path):
-                directory = self.fix(directory)
-            else:
-                directory = os.path.join(self.path, self.fix(directory))
-            shutil.rmtree(directory, ignore_errors=True)
-            log(f"Directory '{directory}' removed successfully.", level='DEBUG')
-            return True
-        except OSError as e:
-            log(f"Error removing: {e}", level='WARNING')
-            return False
+    def run(self):
+        """Run method for WorkerBase to run libraray cleanup periodicly."""
+        log(f"Start library cleanup for path '{self._path}'")
+        if not (dir_list := self.all()):
+            return
+        # Sort by creation time, newest first
+        dir_list.sort(key=lambda x: Path(x).stat().st_birthtime, reverse=True)
+        i = 1
+        for item in dir_list:
+            try:
+                # Remove the item if it exceeds the maximum count for the directory
+                if i > self.max_item_count:
+                    log(f"Found excess item: {item}")
+                    self.remove(item)
+                    continue
+                # Check if the item is older than the maximum age
+                file_age = time.time() - Path(self._path / item).stat().st_birthtime
+                if file_age > self.max_item_age * 24 * 60 * 60:
+                    log(f"Found old item: {item}")
+                    self.remove(item)
+                    continue
+                i += 1
+            except OSError as e:
+                log(f"Failed to clean item '{item}': {e}", level='WARNING')
+                continue
+        log(f"End library cleanup for path '{self._path}'")
+
+    @property
+    def max_item_age(self) -> int:
+        return self._max_item_age
+
+    @max_item_age.setter
+    def max_item_age(self, value: int) -> None:
+        self._max_item_age = max(value, self.DEFAULT_MIN_ITEM_AGE)
+
+    @property
+    def max_item_count(self) -> int:
+        return self._max_item_count
+
+    @max_item_count.setter
+    def max_item_count(self, value: int) -> None:
+        self._max_item_count = max(value, self.DEFAULT_MIN_ITEM_COUNT)
