@@ -29,7 +29,7 @@ class Config(metaclass=SingletonMeta):
         if not os.path.exists(self._file):
             Path(self._file).parent.mkdir(parents=True, exist_ok=True)
             Path(self._file).touch()
-        log(f"Config file '{self._file}' initialized.")
+        log(f"Config file '{os.path.basename(self._file)}' initialized.")
 
     def get(self, key: str, default=None):
         """Get a configuration value"""
@@ -59,7 +59,7 @@ class Config(metaclass=SingletonMeta):
             with open(self._file, mode="r", encoding='UTF-8') as file:
                 config = yaml.safe_load(file)
         except (FileNotFoundError, YAMLError) as e:
-            log(f"Error loading config file '{self._file}': {e}", level="ERROR")
+            log(f"Error loading config file '{os.path.basename(self._file)}': {e}", level="ERROR")
         return config or {}
 
     def _save(self, data: dict):
@@ -68,7 +68,7 @@ class Config(metaclass=SingletonMeta):
             with open(self._file, mode="w", encoding='UTF-8') as file:
                 yaml.safe_dump(data, file, default_flow_style=False, allow_unicode=True)
         except (OSError, YAMLError) as e:
-            log(f"Error saving config file '{self._file}': {e}", level="ERROR")
+            log(f"Error saving config file '{os.path.basename(self._file)}': {e}", level="ERROR")
 
     @staticmethod
     def getfrom(config: dict, key: str, default=None) -> Any:

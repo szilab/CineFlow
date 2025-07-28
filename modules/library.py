@@ -49,7 +49,7 @@ class Library(LibraryBase):
         log(f"Items in library: '{len(results)}'")
         return [self.map(item=item) for item in results]
 
-    def put(self, data: List[Dict]) -> None:
+    def put(self, data: List[Dict]) -> List[Dict]:
         """Import the media to the library."""
         for media in data or []:
             item = self._item_name(media=media)
@@ -58,7 +58,9 @@ class Library(LibraryBase):
             else:
                 image = None
                 log(f"Item '{media['title']}' has no poster.", level='WARNING')
-            self._handler.make(item=item, image=image)
+            if self._handler.make(item=item, image=image):
+                media['directory'] = item
+        return data
 
     def remove(self, data: List[Dict]) -> None:
         """Remove the media from the library."""

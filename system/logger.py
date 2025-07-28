@@ -1,5 +1,6 @@
 """Logger module for logging messages to the console."""
 import os
+import sys
 import threading
 from datetime import datetime
 from enum import Enum
@@ -48,11 +49,16 @@ class Logger():
         """Log a message to the console."""
         if not self._should_log(level):
             return
-        message = (
-            f"[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] " +
-            f"[{level}]".ljust(10) +
-            message
-        )
-        if self._colors:
-            message = LogColors[level].value + message + LogColors['ENDC'].value
-        print(message)
+        with self._lock:
+            thread = threading.current_thread().name
+            thread = thread.replace('MainThread', 'main')
+            message = (
+                f"[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] " +
+                f" ({level} from {thread[:10]})".ljust(26) +
+                message
+            )
+            if self._colors:
+                message = LogColors[level].value + message + LogColors['ENDC'].value
+            # prevent logging from being interrupted by other threads
+            sys.stdout.write(message + '\n')
+            sys.stdout.flush()

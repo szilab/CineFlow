@@ -3,7 +3,7 @@
 import re
 from typing import List, Any
 from bases.module import ConsumerBase
-from system.misc import sort_data, sanitize_name
+from system.misc import sort_data, sanitize_name, media_title, media_year
 
 
 class Jackett(ConsumerBase):
@@ -33,8 +33,8 @@ class Jackett(ConsumerBase):
             'seeders': ['Seeders'],
         }
         self._data_transforms = {
-            'title': self._media_title,
-            'year': self._media_year,
+            'title': media_title,
+            'year': media_year,
         }
 
     def get(self, query = None):
@@ -44,7 +44,6 @@ class Jackett(ConsumerBase):
 
     def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:
         """Search torrents for the given title."""
-        super().search(title=title, year=year)
         results = self._get_results(query=f"{sanitize_name(name=title)} {year}")
         return self.match(results=results, title=title, year=year)
 
@@ -67,19 +66,3 @@ class Jackett(ConsumerBase):
             if media := self.map(item=item):
                 results.append(media)
         return results
-
-    def _title_groups(self, title: str) -> None:
-        result = re.search(r'(.+)\.([12]\d\d\d)\.', title)
-        if not result or len(groups := result.groups()) < 2:
-            return None
-        return groups
-
-    def _media_title(self, title: str) -> None:
-        if group := self._title_groups(title):
-            return group[0].replace('.', ' ').strip()
-        return None
-
-    def _media_year(self, title: str) -> None:
-        if group := self._title_groups(title):
-            return group[1]
-        return None

@@ -14,6 +14,23 @@ def sort_data(data: list, param: str, reverse: bool = False) -> list:
     return sorted(data, key=lambda x: x.get(param), reverse=reverse)
 
 
+def __title_groups(title: str) -> None:
+    result = re.search(r'(.+)\.([12]\d\d\d)\.', title)
+    if not result or len(groups := result.groups()) < 2:
+        return None
+    return groups
+
+def media_title(title: str) -> None:
+    if group := __title_groups(title):
+        return group[0].replace('.', ' ').strip()
+    return None
+
+def media_year(title: str) -> None:
+    if group := __title_groups(title):
+        return group[1]
+    return None
+
+
 def evaluate(left: str, right: str, expression: str, wcase: bool = True) -> bool:
     """Evaluate the expression."""
     if expression == 'exists' and left is not None:

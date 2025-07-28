@@ -54,7 +54,7 @@ class ModuleBase():
                 data[prop] = self._data_transforms[prop](data[prop])
         # all items must have a title and year
         if not data.get('title') or not data.get('year'):
-            log(f"Item missing required fields: {item}", level='WARNING')
+            log(f"Item missing required fields: {item}")
             return {}
         # validate empty properties
         if not self._empty_property_allowed:

@@ -1,88 +1,92 @@
 """Flow Runner"""
 
 import os
-from typing import Any
+from typing import Any, OrderedDict
 import inspect
 import yaml
 from bases.module import ModuleBase
+from bases.worker import WorkerBase
 from system.logger import log
 from system.misc import load_module
 
 
-class FlowManager():
+class FlowManager(WorkerBase):
     """Flow Runner class to manage the execution of tasks."""
 
     def __init__(self) -> None:
         """Initialize the task runner."""
+        super().__init__()
         self._dir = os.environ.get("CFG_DIRECTORY" ,"/config")
-        self._files = []
+        self._flows = {}
+        if os.path.exists(self._dir):
+            self.start()
+
+    def run(self) -> None:
+        """Run the flow manager."""
+        files = []
         for file in os.listdir(self._dir):
             if not os.path.isdir(file) and (file.endswith('.yaml') or file.endswith('.yml')):
-                self._files.append(os.path.join(self._dir, file))
-                self._parse(file=file)
+                files.append(os.path.join(self._dir, file))
             else:
                 log(f"Skipping non-YAML file: {file}")
+        if not files:
+            log("No flow files found to run.", level="INFO")
+            return
+        # add new flows
+        for file in files:
+            if file not in self._flows:
+                self._flows[file] = Flow(file)
+        # remove deleted flows
+        for key, flow in self._flows.items():
+            if key not in files:
+                log(f"Flow '{key._name}' removed from the system.", level="INFO")
+                self._flows.pop(key)
+                del flow
 
-    def _parse(self, file: str) -> None:
-        with open(os.path.join(self._dir, file), 'r', encoding='UTF-8') as stream:
-            try:
-                data = yaml.safe_load(stream)
-                if data and isinstance(data, dict) and data.get("steps"):
-                    log(f"Execute flow: '{data.get("name", file)}'", level="INFO")
-                    Flow(flow_data=data)
-                else:
-                    log(f"Invalid flow '{file}': Bad formating or missing 'steps'.", level="ERROR")
-            except yaml.YAMLError as exc:
-                log(f"Error loading flow file '{file}': {exc}", level="ERROR")
+    def close(self) -> None:
+        """Close the flow manager."""
+        for flow in self._flows.values():
+            log(f"Stopping flow '{flow._name}' from file '{self._filename}'", level="INFO")
+            flow.stop()
 
 
-class Flow():
+class Flow(WorkerBase):
     """Class to manage the execution of a flow."""
 
-    def __init__(self, flow_data: dict) -> None:
+    def __init__(self, file: str) -> None:
         """Initialize the task runner."""
-        self._name = flow_data.get("name")
-        self._steps = flow_data.get("steps")
+        super().__init__()
+        self._file = file
+        self._filename = os.path.basename(file)
+        self._name = 'Unnamed Flow'
+        self._steps = []
+        self._delay = 60
         self._mod_cache = {}
         self._outputs = {}
-        if self.validate():
-            self.run()
-
-    def validate(self) -> bool:
-        """Validate the flow data."""
-        if not isinstance(self._steps, list):
-            log("Flow steps are missing or invalid.", level="ERROR")
-            return False
-        for step in self._steps:
-            if not isinstance(step, dict):
-                log(f"Invalid step definition: {step}. Expected a dictionary.", level="ERROR")
-                return False
-            name = step.get("name")
-            if not step.get("module") or not step.get("action"):
-                log(
-                    f"Invalid step definition: '{name or step}' missing 'module' or 'action'.",
-                    level="ERROR"
-                )
-                return False
-        return True
+        log(f"Flow '{self._filename}' initialized.", level="INFO")
+        self.start()
 
     def run(self) -> None:
         """Run the flow."""
+        super().run()
+        if not self._validate_flow():
+            return
+        log(f"Flow '{self._name}' from file '{self._filename}' started.", level="INFO")
         for step in self._steps:
             log(f"Start step '{step.get('name')}'", level="MSG")
             outp = None
-            # try:
-            if not (inst := self._load_module(step=step)):
+            try:
+                if not (inst := self._load_module(step=step)):
+                    return
+                if not (action := self._load_action(inst=inst, step=step)):
+                    return
+                if not (inp := self._load_input(step=step)):
+                    log(f"No input data for step '{step.get('name')}'.")
+                outp = self._call_action(action=action, inp=inp)
+            except (ValueError, TypeError) as exc:
+                log(f"Stop flow, error calling action '{step}': {exc}", level="ERROR")
+                # log (f"Parameters: {inp}")
                 return
-            if not (action := self._load_action(inst=inst, step=step)):
-                return
-            if not (inp := self._load_input(step=step)):
-                log(f"No input data for step '{step.get('name')}'.")
-            outp = self._call_action(action=action, inp=inp)
-            # except (ValueError, TypeError) as exc:
-            #     log(f"Stop flow, error calling action '{step}': {exc}", level="ERROR")
-            #     # log (f"Parameters: {inp}")
-            #     return
             # if outp:
             if step.get("name"):
                 self._outputs[step.get("name")] = outp
@@ -137,5 +141,39 @@ class Flow():
         if len(params) == 0:
             return action()
         elif len(params) == 1:
+            if isinstance(inp, dict):
+                if next(iter(params)) == next(iter(inp)):
+                    return action(**inp)
+            elif isinstance(inp, list):
+                return action(inp)
             return action(inp)
         return action(**inp)
+
+    def _parse_file(self) -> None:
+        with open(self._file, 'r', encoding='UTF-8') as stream:
+            try:
+                data = yaml.safe_load(stream)
+                if data and isinstance(data, dict) and data.get("steps"):
+                    self._name = data.get("name", self._name)
+                    self._steps = data.get("steps", self._steps)
+                    self._delay = data.get("delay", self._delay)
+            except yaml.YAMLError as exc:
+                log(f"Error loading flow file '{self._filename}': {exc}", level="WARNING")
+
+    def _validate_flow(self) -> bool:
+        self._parse_file()
+        if not isinstance(self._steps, list) or not self._steps:
+            log(f"Flow steps are missing or invalid in '{self._filename}'.", level="WARNING")
+            return False
+        for step in self._steps:
+            if not isinstance(step, dict):
+                log(f"Invalid step definition: {step}. Expected a dictionary.", level="WARNING")
+                return False
+            name = step.get("name")
+            if not step.get("module") or not step.get("action"):
+                log(
+                    f"Invalid step definition: '{name or step}' missing 'module' or 'action'.",
+                    level="WARNING"
+                )
+                return False
+        return True

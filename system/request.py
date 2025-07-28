@@ -18,6 +18,7 @@ class RequestResponse:
     data: dict
     status: int
     cookies: dict
+    headers: dict
 
 
 class RequestHandler:
@@ -34,6 +35,7 @@ class RequestHandler:
         self._headers = self.DEFAULT_HEADERS
         self._rate_limiter = RateLimiter()
         self._cache_handler = CacheHandler(cache_time=0)
+        self._ok_statuses = {200, 201, 202, 204}  # HTTP OK statuses
 
     def get(self, endpoint: str, **kwargs) -> RequestResponse:
         """Make a GET request"""
@@ -54,7 +56,7 @@ class RequestHandler:
         kwargs['headers'] = {**self._headers, **kwargs.get("headers", {})}
         # return cached response if available
         if cached := self._cache_handler.read(method, full_url, **kwargs):
-            return RequestResponse(data=cached, status=200, cookies={})
+            return RequestResponse(data=cached, status=200, cookies={}, headers={})
         # respect API rate limits
         self._rate_limiter.wait()
         # shoot the request
@@ -65,24 +67,29 @@ class RequestHandler:
                 timeout=int(os.environ.get('REQUEST_TIMEOUT', '15')),
                 **kwargs
             )
-            response.raise_for_status()
+            if not self.ok_statuses:
+                response.raise_for_status()
         except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
             log(f"Request error '{full_url}': {e}", level='WARNING')
-            return RequestResponse(data=None, status=0, cookies={})
-        if not response:
+            return RequestResponse(data=None, status=0, cookies={}, headers={})
+        if self._ok_statuses and response.status_code not in self.ok_statuses:
+            log(f"Unexpected status code {response.status_code} for '{full_url}'", level='WARNING')
+            return RequestResponse(data=None, status=response.status_code, cookies={}, headers={})
+        if not response.content:
             log(f"No response received for '{full_url}'", level='WARNING')
-            return RequestResponse(data=None, status=0, cookies={})
+            return RequestResponse(data=None, status=0, cookies={}, headers={})
         # try to parse the response as JSON
         try:
             data = response.json()
         except JSONDecodeError:
             log(f"Response is not JSON: {response.text}")
             data = response.text.strip()
-        self._cache_handler.write(method, url=full_url, data=data, **kwargs)
+        self._cache_handler.write(method, url=full_url, resp_data=data, **kwargs)
         return RequestResponse(
             data=data,
             status=response.status_code,
-            cookies=response.cookies.get_dict()
+            cookies=response.cookies.get_dict(),
+            headers=response.headers
         )
 
     @property
@@ -125,6 +132,19 @@ class RequestHandler:
     def cache_time(self, value: int) -> None:
         self._cache_handler.cache_time = max(value, 0)
 
+    @property
+    def ok_statuses(self) -> set:
+        return self._ok_statuses
+
+    @ok_statuses.setter
+    def ok_statuses(self, value: set) -> None:
+        if not value:
+            self._ok_statuses = None
+        if not isinstance(value, set):
+            self._ok_statuses = {200, 201, 202, 204}
+        else:
+            self._ok_statuses = value
+
 
 class CacheHandler:
     """Handles caching of request responses."""
@@ -144,12 +164,12 @@ class CacheHandler:
         rhash = self._hash(method, url, kwargs)
         return self._db.get_request(rhash=rhash, expire=self.cache_time)
 
-    def write(self, method: str, url: str, data: dict, **kwargs) -> None:
+    def write(self, method: str, url: str, resp_data: dict, **kwargs) -> None:
         """Write response to the cache."""
         if self.cache_time <= 0:
             return
         rhash = self._hash(method, url, kwargs)
-        self._db.store_request(rhash=rhash, data=data)
+        self._db.store_request(rhash=rhash, data=resp_data)
 
 
 class RateLimiter:

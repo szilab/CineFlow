@@ -70,9 +70,12 @@ class Jellyfin(ConsumerBase):
     def _query_user_ids(self, query: dict) -> List[dict]:
         if not query:
             return [None]
-        if query.get("allUser"):
-            del query["allUser"]
-            return [id for _,id in self._user_list.items()]
+        if query.get("allUsers"):
+            del query["allUsers"]
+            users = [id for _,id in self._user_list.items()]
+            if not users:
+                raise ValueError("No users found in Jellyfin, skip the rest.")
+            return users
         elif query.get("userName"):
             if query.get("userName") not in self._user_list:
                 raise ValueError(f"User '{query['userName']}' not found in Jellyfin.")

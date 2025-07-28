@@ -28,7 +28,7 @@ class Database(WorkerBase, metaclass=SingletonMeta):
             self.create_tables()
         except sqlite3.Error as e:
             log(f"Cache database connection error cache database not usable: {e}", level="WARNING")
-        log(f"Cache database initialized with file '{self._file}'")
+        log(f"Cache database initialized with file '{os.path.basename(self._file)}'")
         self.start()
 
     def create_tables(self):
@@ -144,10 +144,16 @@ class Database(WorkerBase, metaclass=SingletonMeta):
 
     def run(self):
         """Run the database cleanup."""
-        log(f"Start database cleanup for db '{self._file}'")
+        log(f"Start database cleanup for db '{os.path.basename(self._file)}'")
         self._table_cleanup("media")
         self._table_cleanup("request")
-        log(f"End database cleanup for db '{self._file}'")
+        log(f"End database cleanup for db '{os.path.basename(self._file)}'")
+
+    def close(self):
+        """Close the database connection."""
+        if self._conn:
+            self._conn.close()
+            log(f"Database connection closed for '{os.path.basename(self._file)}'")
 
     def _table_cleanup(self, table: str):
         """Cleanup old entries from the specified table."""
