@@ -31,10 +31,28 @@ class ModuleBase():
 
     def cfg(self, key: str, default=None) -> dict:
         """Return the module configuration."""
-        return  Config.getfrom(self._cfg, key=key, default=default)
+        return Config.getfrom(self._cfg, key=key, default=default)
 
     def map(self, item: dict) -> dict:
         """Interpret the received item as the data structure."""
+        data = self._map_props(item=item)
+        # all items must have a title and year
+        if not data.get('title') or not data.get('year'):
+            log(f"Item missing required fields: {item}")
+            return {}
+        # validate empty properties
+        if not self._empty_property_allowed:
+            for key, value in data.items():
+                if not value:
+                    log(
+                        f"Empty property '{key}' not allowed in {self.name} module.",
+                        level='WARNING'
+                    )
+                    return {}
+        return data
+
+    def _map_props(self, item: dict) -> dict:
+        """Map the properties of the item to the data structure."""
         if not isinstance(item, dict):
             log(f"Invalid item type: {type(item)}. Expected dict.", level='WARNING')
             return {}
@@ -49,22 +67,6 @@ class ModuleBase():
                     if alias in item:
                         data[prop] = item[alias]
                         break
-            # apply any data transformations
-            if prop in self._data_transforms and data.get(prop):
-                data[prop] = self._data_transforms[prop](data[prop])
-        # all items must have a title and year
-        if not data.get('title') or not data.get('year'):
-            log(f"Item missing required fields: {item}")
-            return {}
-        # validate empty properties
-        if not self._empty_property_allowed:
-            for key, value in data.items():
-                if not value:
-                    log(
-                        f"Empty property '{key}' not allowed in {self.name} module.",
-                        level='WARNING'
-                    )
-                    return {}
         return data
 
     @property

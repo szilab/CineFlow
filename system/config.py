@@ -23,7 +23,7 @@ class Config(metaclass=SingletonMeta):
     """Manage configuration values"""
 
     def __init__(self):
-        self._file = os.path.join(os.environ.get("DATA_DIRECTORY" ,"/config"), "config.yaml")
+        self._file = os.path.join(os.environ.get("DATA_DIRECTORY", "/config"), "config.yaml")
         self._lock = threading.Lock()
         self._mandatory = []
         if not os.path.exists(self._file):

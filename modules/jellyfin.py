@@ -38,13 +38,13 @@ class Jellyfin(ConsumerBase):
 
     def get(self, query: Any = None) -> List[dict]:
         """Collect media from Jellyfin."""
-        query=self._parse_query(query)
+        query = self._parse_query(query)
         if query.get("isInverse"):
             del query["isInverse"]
             results = self._inverse_items(query_items=self._get_items(query=query))
         else:
             results = self._get_items(query=query)
-        return {item['jellyfinid']:item for item in results}.values()
+        return {item['jellyfinid']: item for item in results}.values()
 
     def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:
         """Search media for the given title."""
@@ -72,7 +72,7 @@ class Jellyfin(ConsumerBase):
             return [None]
         if query.get("allUsers"):
             del query["allUsers"]
-            users = [id for _,id in self._user_list.items()]
+            users = [id for _, id in self._user_list.items()]
             if not users:
                 raise ValueError("No users found in Jellyfin, skip the rest.")
             return users

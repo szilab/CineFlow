@@ -5,6 +5,7 @@ import threading
 from datetime import datetime
 from enum import Enum
 
+
 def log(*values, level: str = 'DEBUG'):
     """Shortcut to log a message to the console."""
     Logger().log(*values, level=level)
@@ -43,7 +44,7 @@ class Logger():
         self._lock = threading.Lock()
 
     def _should_log(self, level):
-        return LogLevels[level].value >=self._level.value
+        return LogLevels[level].value >= self._level.value
 
     def log(self, message, level: str = 'DEBUG'):
         """Log a message to the console."""

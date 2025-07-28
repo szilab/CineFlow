@@ -46,7 +46,7 @@ class Tmdb(ConsumerBase):
         while len(collected) < self.limit or page > 20:
             response = self._handler.get(
                 endpoint=f"/trending/{self.kind}/week",
-                params={'page': page,}
+                params={'page': page, }
             )
             if not response.data or not isinstance(response.data, dict):
                 break

@@ -16,7 +16,7 @@ class FlowManager(WorkerBase):
     def __init__(self) -> None:
         """Initialize the task runner."""
         super().__init__()
-        self._dir = os.environ.get("CFG_DIRECTORY" ,"/config")
+        self._dir = os.environ.get("CFG_DIRECTORY", "/config")
         self._flows = {}
         if os.path.exists(self._dir):
             self.start()

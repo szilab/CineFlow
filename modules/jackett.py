@@ -36,7 +36,7 @@ class Jackett(ConsumerBase):
             'year': media_year,
         }
 
-    def get(self, query = None):
+    def get(self, query: Any = None):
         """Collect torrents from Jackett."""
         results = self._get_results(query=query)
         return results[:self._limit] if results else []

@@ -79,7 +79,7 @@ class Transmission(ConsumerBase):
             if response.get('torrent-duplicate'):
                 log(f"Torrent '{media.get('title')}' already exists in Transmission.")
                 media['transmission_status'] = 'duplicate'
-            elif  response.get('torrent-added'):
+            elif response.get('torrent-added'):
                 log(f"Torrent '{media.get('title')}' added successfully.", level='MSG')
                 media['transmission_status'] = 'added'
             else:

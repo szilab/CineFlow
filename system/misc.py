@@ -20,10 +20,12 @@ def __title_groups(title: str) -> None:
         return None
     return groups
 
+
 def media_title(title: str) -> None:
     if group := __title_groups(title):
         return group[0].replace('.', ' ').strip()
     return None
+
 
 def media_year(title: str) -> None:
     if group := __title_groups(title):
@@ -34,12 +36,8 @@ def media_year(title: str) -> None:
 def evaluate(left: str, right: str, expression: str, wcase: bool = True) -> bool:
     """Evaluate the expression."""
     outcome = False
-    if expression == 'exists' and left is not None:
-        outcome = True
-    elif expression == 'missing' and left is None:
-        outcome = True
-    elif expression == 'none' and right is None:
-        outcome = True
+    if expression in ('exists', 'missing', 'none'):
+        outcome = _evaluate_null_logic(left=left, right=right, expression=expression)
     elif left and right and left.isdigit() and right.isdigit():
         left = int(left)
         right = int(right)
@@ -74,3 +72,13 @@ def load_module(name: str) -> object:
             if hasattr(module_obj, class_name):
                 return getattr(module_obj, class_name)
     return None
+
+
+def _evaluate_null_logic(left: str, right: str, expression: str) -> bool:
+    if expression == 'exists':
+        return left is not None
+    if expression == 'missing':
+        return left is None
+    if expression == 'none':
+        return right is None
+    return False

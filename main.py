@@ -43,10 +43,12 @@ class MainApp:
                 component.stop()
         log("Application shutdown complete", level="INFO")
 
+
 def main():
     """Main function"""
     app = MainApp()
     app.run()
+
 
 if __name__ == '__main__':
     main()
