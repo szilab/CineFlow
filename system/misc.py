@@ -33,32 +33,33 @@ def media_year(title: str) -> None:
 
 def evaluate(left: str, right: str, expression: str, wcase: bool = True) -> bool:
     """Evaluate the expression."""
+    outcome = False
     if expression == 'exists' and left is not None:
-        return True
-    if expression == 'missing' and left is None:
-        return True
-    if expression == 'none' and right is None:
-        return True
-    if left and right and left.isdigit() and right.isdigit():
+        outcome = True
+    elif expression == 'missing' and left is None:
+        outcome = True
+    elif expression == 'none' and right is None:
+        outcome = True
+    elif left and right and left.isdigit() and right.isdigit():
         left = int(left)
         right = int(right)
         if expression == 'eq':
-            return left == right
-        if expression == 'lt':
-            return left < right
-        if expression == 'gt':
-            return left > right
+            outcome = left == right
+        elif expression == 'lt':
+            outcome = left < right
+        elif expression == 'gt':
+            outcome = left > right
     else:
         if not wcase:
             left = left.lower() if left else ''
             right = right.lower() if right else ''
         if expression == 'eq':
-            return left == right
-        if expression == 'ne':
-            return left != right
-        if expression == 'contains':
-            return right in left
-    return False
+            outcome = left == right
+        elif expression == 'ne':
+            outcome = left != right
+        elif expression == 'contains':
+            outcome = right in left
+    return outcome
 
 
 def load_module(name: str) -> object:

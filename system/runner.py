@@ -1,7 +1,7 @@
 """Flow Runner"""
 
 import os
-from typing import Any, OrderedDict
+from typing import Any
 import inspect
 import yaml
 from bases.module import ModuleBase
@@ -39,14 +39,14 @@ class FlowManager(WorkerBase):
         # remove deleted flows
         for key, flow in self._flows.items():
             if key not in files:
-                log(f"Flow '{key._name}' removed from the system.", level="INFO")
+                log(f"Flow '{flow.name}' removed from the system.", level="INFO")
                 self._flows.pop(key)
                 del flow
 
     def close(self) -> None:
         """Close the flow manager."""
         for flow in self._flows.values():
-            log(f"Stopping flow '{flow._name}' from file '{self._filename}'", level="INFO")
+            log(f"Stopping flow '{flow.name}'.", level="INFO")
             flow.stop()
 
 
@@ -58,9 +58,9 @@ class Flow(WorkerBase):
         super().__init__()
         self._file = file
         self._filename = os.path.basename(file)
-        self._name = 'Unnamed Flow'
-        self._steps = []
-        self._delay = 60
+        self.name = 'Unnamed Flow'
+        self.steps = []
+        self.delay = 60
         self._mod_cache = {}
         self._outputs = {}
         log(f"Flow '{self._filename}' initialized.", level="INFO")
@@ -71,8 +71,8 @@ class Flow(WorkerBase):
         super().run()
         if not self._validate_flow():
             return
-        log(f"Flow '{self._name}' from file '{self._filename}' started.", level="INFO")
-        for step in self._steps:
+        log(f"Flow '{self.name}' from file '{self._filename}' started.", level="INFO")
+        for step in self.steps:
             log(f"Start step '{step.get('name')}'", level="MSG")
             outp = None
             try:
@@ -92,7 +92,7 @@ class Flow(WorkerBase):
                 self._outputs[step.get("name")] = outp
             self._outputs['latest'] = outp
             log(f"Step '{step.get('name')}' executed successfully.", level="MSG")
-        log(f"Flow '{self._name}' executed successfully.", level="INFO")
+        log(f"Flow '{self.name}' executed successfully.", level="INFO")
 
     def _load_module(self, step: dict) -> ModuleBase | None:
         """Load a module by its name."""
@@ -140,7 +140,7 @@ class Flow(WorkerBase):
         params = inspect.signature(action).parameters
         if len(params) == 0:
             return action()
-        elif len(params) == 1:
+        if len(params) == 1:
             if isinstance(inp, dict):
                 if next(iter(params)) == next(iter(inp)):
                     return action(**inp)
@@ -154,18 +154,18 @@ class Flow(WorkerBase):
             try:
                 data = yaml.safe_load(stream)
                 if data and isinstance(data, dict) and data.get("steps"):
-                    self._name = data.get("name", self._name)
-                    self._steps = data.get("steps", self._steps)
-                    self._delay = data.get("delay", self._delay)
+                    self.name = data.get("name", self.name)
+                    self.steps = data.get("steps", self.steps)
+                    self.delay = data.get("delay", self.delay)
             except yaml.YAMLError as exc:
                 log(f"Error loading flow file '{self._filename}': {exc}", level="WARNING")
 
     def _validate_flow(self) -> bool:
         self._parse_file()
-        if not isinstance(self._steps, list) or not self._steps:
+        if not isinstance(self.steps, list) or not self.steps:
             log(f"Flow steps are missing or invalid in '{self._filename}'.", level="WARNING")
             return False
-        for step in self._steps:
+        for step in self.steps:
             if not isinstance(step, dict):
                 log(f"Invalid step definition: {step}. Expected a dictionary.", level="WARNING")
                 return False

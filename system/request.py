@@ -172,7 +172,7 @@ class CacheHandler:
         self._db.store_request(rhash=rhash, data=resp_data)
 
 
-class RateLimiter:
+class RateLimiter:  # pylint: disable=too-few-public-methods
     """Simple rate limiter that ensures a minimum delay between actions."""
 
     def __init__(self, min_interval: float = 0.3):

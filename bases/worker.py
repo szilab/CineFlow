@@ -3,7 +3,6 @@
 import random
 from abc import ABC, abstractmethod
 from threading import Thread, Event
-from time import sleep
 
 
 class WorkerBase(ABC):
@@ -14,7 +13,6 @@ class WorkerBase(ABC):
         self._thread = None
         self._first_run = True
         self._stop_event = Event()
-        self.name = self.__class__.__name__.lower()
 
     @abstractmethod
     def run(self) -> None:
@@ -36,7 +34,11 @@ class WorkerBase(ABC):
         self._stop_event.clear()
         if self._thread and self._thread.is_alive():
             return
-        self._thread = Thread(target=self.worker, daemon=True, name=f"{self.name.lower()}")
+        self._thread = Thread(
+            target=self.worker,
+            daemon=True,
+            name=self.__class__.__name__.lower()
+        )
         self._thread.start()
 
     def stop(self) -> None:

@@ -1,6 +1,5 @@
 """Jackett API consumer module."""
 
-import re
 from typing import List, Any
 from bases.module import ConsumerBase
 from system.misc import sort_data, sanitize_name, media_title, media_year

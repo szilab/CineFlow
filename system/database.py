@@ -80,7 +80,7 @@ class Database(WorkerBase, metaclass=SingletonMeta):
             except (AttributeError, sqlite3.Error) as e:
                 log(f"Error storing media in cache DB: {e}", level="WARNING")
 
-    def get_media(self, source: str, title: str, year: int, kind: str, expire: int = None) -> dict:
+    def get_media(self, source: str, title: str, year: int, kind: str) -> dict:
         """Get movie by title"""
         with self._lock:
             try:
@@ -95,9 +95,7 @@ class Database(WorkerBase, metaclass=SingletonMeta):
             if not data:
                 log(f"Media not found in cache DB: {title} ({year})")
                 return None
-            if not expire:
-                expire = self._default_expire
-            if data[1] + expire < dt.now().timestamp():
+            if data[1] + self._default_expire < dt.now().timestamp():
                 log(f"Media expired in cache DB: {title} ({year})")
                 return None
             return json.loads(base64.b64decode(data[0]).decode("utf-8"))

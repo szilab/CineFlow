@@ -64,7 +64,7 @@ class Transmission(ConsumerBase):
         """Add torrent to the download list."""
         if not data:
             log("No data provided to add to Transmission.", level='MSG')
-            return
+            return data
         for media in data:
             if not media.get('link'):
                 log(f"Item '{media.get('title')}' is missing torrent link.", level='WARNING')
@@ -86,7 +86,7 @@ class Transmission(ConsumerBase):
                 log(f"Failed to add torrent '{media.get('title')}': {response.get('result')}", level='ERROR')
                 media['transmission_status'] = 'error'
         return data
-                   
+
     def _rpc_request(self, method: str, params: dict = None) -> dict:
         """Make a request to the Transmission RPC API."""
         response = self._handler.post(
@@ -115,6 +115,6 @@ class Transmission(ConsumerBase):
             auth=self._auth
         )
         if not response.headers.get('X-Transmission-Session-Id'):
-            raise Exception(f"Failed to get session ID: {response.status}")
-        log(f"Transmission session ID retrieved.")
+            raise ValueError(f"Failed to get session ID: {response.status}")
+        log("Transmission session ID retrieved.")
         return response.headers.get('X-Transmission-Session-Id')

@@ -17,7 +17,6 @@ class KnownColors:
     white: str = '#FFFFFF'
     black: str = '#000000'
     orange: str = '#FF7F00'
-    pink: str = '#FF69B4'
 
 
 class ImageHandler():
