@@ -54,7 +54,7 @@ class Logger():
             thread = threading.current_thread().name
             thread = thread.replace('MainThread', 'main')
             message = (
-                f"[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] " +
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] " +
                 f" ({level} from {thread[:10]})".ljust(26) +
                 message
             )
