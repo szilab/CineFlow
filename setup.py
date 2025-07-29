@@ -11,8 +11,9 @@ def read_long_description():
     if os.path.exists(readme_path):
         with open(readme_path, 'r', encoding='utf-8') as f:
             return f.read()
-    raise FileNotFoundError(
-        "README.md not found. Please create a README.md file in the package root directory."
+    return (
+        "CineFlow is a workflow automation system for media processing. "
+        "For more details, please refer to the documentation."
     )
 
 
@@ -23,9 +24,11 @@ def read_requirements():
     if os.path.exists(req_path):
         with open(req_path, 'r', encoding='utf-8') as f:
             return [line.strip() for line in f if line.strip() and not line.startswith('#')]
-    raise FileNotFoundError(
-        "requirements.txt not found. Please create a requirements.txt file in the package root directory."
-    )
+    return [
+        'pyyaml>=6.0',
+        'requests>=2.32.3',
+        'pillow>=11.2.1',
+    ]
 
 
 # Read version from __init__.py or set default
