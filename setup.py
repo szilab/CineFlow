@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 MODULE_NAME = 'cineflow'
 PROJECT_NAME = MODULE_NAME.replace('-', '_')
 PROJECT_DESC = 'A workflow automation system for media processing'
-REPOSITORY_URL = 'https://github.com/huszilagyisandor/CineFlow'
+REPOSITORY_URL = 'https://github.com/szilab/CineFlow'
 AUTHOR = 'Sandor Szilagyi'
 PYTHON_REQUIRES = '>=3.10'
 INSTALL_REQUIRES = [
