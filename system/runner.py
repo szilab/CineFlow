@@ -50,7 +50,7 @@ class FlowManager(WorkerBase):
             flow.stop()
 
 
-class Flow(WorkerBase):
+class Flow(WorkerBase):  # pylint: disable=too-few-public-methods
     """Class to manage the execution of a flow."""
 
     def __init__(self, file: str) -> None:

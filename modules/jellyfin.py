@@ -18,7 +18,7 @@ class Jellyfin(ConsumerBase):
         - search: Search media for a given title.
     """
 
-    def __init__(self, config: dict = None, required: list = None) -> None:
+    def __init__(self, config: dict = None) -> None:
         super().__init__(config=config, required=['url', 'token'])
         self.rate_limit = 0
         self.cache_time = 0
@@ -46,7 +46,7 @@ class Jellyfin(ConsumerBase):
             results = self._get_items(query=query)
         return {item['jellyfinid']: item for item in results}.values()
 
-    def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:
+    def search(self, title: str, year: int) -> List[dict]:
         """Search media for the given title."""
         results = self._get_items()
         return self.match(results=results, title=title, year=year)

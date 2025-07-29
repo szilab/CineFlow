@@ -35,7 +35,7 @@ jobs:
         pip install flake8 pylint
         flake8 . --count --max-complexity=10 --max-line-length=120 --statistics
         pylint $(git ls-files '*.py')
-      continue-on-error: true
+      continue-on-error: false
 
     - name: Test setup.py
       run: |
@@ -84,7 +84,7 @@ jobs:
         twine check dist/*
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: python-packages
         path: dist/

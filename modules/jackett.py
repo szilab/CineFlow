@@ -41,7 +41,7 @@ class Jackett(ConsumerBase):
         results = self._get_results(query=query)
         return results[:self._limit] if results else []
 
-    def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:
+    def search(self, title: str, year: int) -> List[dict]:
         """Search torrents for the given title."""
         results = self._get_results(query=f"{sanitize_name(name=title)} {year}")
         return self.match(results=results, title=title, year=year)

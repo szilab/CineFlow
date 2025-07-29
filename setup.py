@@ -1,7 +1,7 @@
 """Setup configuration for CineFlow package."""
 
-from setuptools import setup, find_packages
 import os
+from setuptools import setup, find_packages
 
 
 # Read the contents of README file
