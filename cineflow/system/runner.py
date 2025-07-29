@@ -4,10 +4,10 @@ import os
 from typing import Any
 import inspect
 import yaml
-from bases.module import ModuleBase
-from bases.worker import WorkerBase
-from system.logger import log
-from system.misc import load_module
+from cineflow.bases.module import ModuleBase
+from cineflow.bases.worker import WorkerBase
+from cineflow.system.logger import log
+from cineflow.system.misc import load_module
 
 
 class FlowManager(WorkerBase):
@@ -25,10 +25,11 @@ class FlowManager(WorkerBase):
         """Run the flow manager."""
         files = []
         for file in os.listdir(self._dir):
-            if not os.path.isdir(file) and (file.endswith('.yaml') or file.endswith('.yml')):
+            if os.path.isdir(file) or file == "config.yaml":
+                continue
+            if file.endswith('.yaml') or file.endswith('.yml'):
                 files.append(os.path.join(self._dir, file))
-            else:
-                log(f"Skipping non-YAML file: {file}")
+            log(f"Skipping non-YAML file: {file}")
         if not files:
             log("No flow files found to run.", level="INFO")
             return

@@ -6,8 +6,8 @@ from typing import Any
 from pathlib import Path
 import yaml
 from yaml import YAMLError
-from bases.singleton import SingletonMeta
-from system.logger import log
+from cineflow.bases.singleton import SingletonMeta
+from cineflow.system.logger import log
 
 
 def cfg(key: str, value: Any = None, default: Any = None, required: bool = False):
@@ -23,7 +23,7 @@ class Config(metaclass=SingletonMeta):
     """Manage configuration values"""
 
     def __init__(self):
-        self._file = os.path.join(os.environ.get("DATA_DIRECTORY", "/config"), "config.yaml")
+        self._file = os.path.join(os.environ.get("CFG_DIRECTORY", "/config"), "config.yaml")
         self._lock = threading.Lock()
         self._mandatory = []
         if not os.path.exists(self._file):

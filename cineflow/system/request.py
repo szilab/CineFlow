@@ -8,8 +8,8 @@ from typing import Optional
 from dataclasses import dataclass
 from json import JSONDecodeError
 import requests
-from system.logger import log
-from system.database import Database as Db
+from cineflow.system.logger import log
+from cineflow.system.database import Database as Db
 
 
 @dataclass

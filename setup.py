@@ -3,80 +3,58 @@
 import os
 from setuptools import setup, find_packages
 
-
-# Read the contents of README file
-def read_long_description():
-    """Read the long description from README.md if it exists."""
-    readme_path = os.path.join(os.path.dirname(__file__), 'README.md')
-    if os.path.exists(readme_path):
-        with open(readme_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    return (
-        "CineFlow is a workflow automation system for media processing. "
-        "For more details, please refer to the documentation."
-    )
-
-
-# Read requirements from requirements.txt if it exists
-def read_requirements():
-    """Read requirements from requirements.txt if it exists."""
-    req_path = os.path.join(os.path.dirname(__file__), 'requirements.txt')
-    if os.path.exists(req_path):
-        with open(req_path, 'r', encoding='utf-8') as f:
-            return [line.strip() for line in f if line.strip() and not line.startswith('#')]
-    return [
-        'pyyaml>=6.0',
-        'requests>=2.32.3',
-        'pillow>=11.2.1',
-    ]
+MODULE_NAME = 'cineflow'
+PROJECT_NAME = MODULE_NAME.replace('-', '_')
+PROJECT_DESC = 'A workflow automation system for media processing'
+REPOSITORY_URL = 'https://github.com/huszilagyisandor/CineFlow'
+AUTHOR = 'Sandor Szilagyi'
+PYTHON_REQUIRES = '>=3.10'
+INSTALL_REQUIRES = [
+    'pyyaml>=6.0',
+    'requests>=2.32.3',
+    'pillow>=11.2.1',
+]
 
 
-# Read version from __init__.py or set default
 def read_version():
     """Read version from package __init__.py or set default."""
-    version_file = os.path.join(os.path.dirname(__file__), 'cineflow', '__init__.py')
+    if os.getenv('VERSION', None) is not None:
+        return os.getenv('VERSION')
+    version_file = os.path.join(os.path.dirname(__file__), 'VERSION')
     if os.path.exists(version_file):
-        with open(version_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.startswith('__version__'):
-                    return line.split('=')[1].strip().strip('"\'')
-    return '1.0.0'
+        with open(version_file, "r") as f:
+            return f.read().strip()
+    return '0.0.1'
+
+
+def readme():
+    try:
+        with open('README.md') as f:
+            return f.read()
+    except FileNotFoundError:
+        return f"Cannot find README.md, please visit '{REPOSITORY_URL}' ."
 
 
 setup(
     # Basic package information
-    name='cineflow',
+    name=PROJECT_NAME,
     version=read_version(),
-    author='Sandor Szilagyi',
-    description='A workflow automation system for media processing',
-    long_description=read_long_description(),
+    author=AUTHOR,
+    description=PROJECT_DESC,
+    long_description=readme(),
     long_description_content_type='text/markdown',
-    url='https://github.com/huszilagyisandor/CineFlow',  # Replace with your repo URL
+    url=REPOSITORY_URL,
     license='MIT',
-    packages=find_packages(exclude=['tests*', 'docs*', 'examples*']),
-    py_modules=['main'],
-    package_dir={'': '.'},
-    # Include non-Python files
+    packages=find_packages(),
     include_package_data=True,
     package_data={
-        '': ['*.yaml', '*.yml', '*.txt', '*.md'],
-        'cineflow': [
-            'config/*.yaml',
-            'config/*.yml',
-            'flows/*.yaml',
-            'flows/*.yml',
-        ],
+        '': ['*.yaml', '*.yml', '*.txt', '*.md', '*.json'],
     },
-    # Python version requirement
-    python_requires='>=3.10',
-    # Dependencies
-    install_requires=read_requirements(),
-    # Console scripts / entry points
+    install_requires=INSTALL_REQUIRES,
     entry_points={
         'console_scripts': [
-            'cineflow=main:main',
+            'cineflow=cineflow.main:main',
         ],
     },
-    # Zip safe or not
     zip_safe=False,
 )

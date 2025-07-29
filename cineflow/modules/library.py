@@ -2,10 +2,10 @@
 
 from typing import List, Dict
 from PIL import Image
-from system.logger import log
-from system.misc import evaluate
-from system.image import ImageHandler
-from bases.module import LibraryBase
+from cineflow.system.logger import log
+from cineflow.system.misc import evaluate
+from cineflow.system.image import ImageHandler
+from cineflow.bases.module import LibraryBase
 
 
 class Library(LibraryBase):

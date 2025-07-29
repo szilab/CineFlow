@@ -2,11 +2,11 @@
 
 from typing import List, Dict, Any
 from abc import ABC, abstractmethod
-from system.logger import log
-from system.config import Config, cfg
-from system.misc import sanitize_name
-from system.request import RequestHandler
-from system.directory import DirectoryHandler
+from cineflow.system.logger import log
+from cineflow.system.config import Config, cfg
+from cineflow.system.misc import sanitize_name
+from cineflow.system.request import RequestHandler
+from cineflow.system.directory import DirectoryHandler
 
 
 class ModuleBase():

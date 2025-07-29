@@ -1,14 +1,15 @@
 """Database module for storing media information"""
 
 import os
+import tempfile
 import threading
 import sqlite3
 import json
 import base64
 from datetime import datetime as dt
-from system.logger import log
-from bases.singleton import SingletonMeta
-from bases.worker import WorkerBase
+from cineflow.system.logger import log
+from cineflow.bases.singleton import SingletonMeta
+from cineflow.bases.worker import WorkerBase
 
 
 class Database(WorkerBase, metaclass=SingletonMeta):
@@ -17,7 +18,7 @@ class Database(WorkerBase, metaclass=SingletonMeta):
 
     def __init__(self):
         super().__init__()
-        self._file = os.path.join(os.environ.get("DATA_DIRECTORY", "/data"), "db.sqlite3")
+        self._file = os.path.join(tempfile.gettempdir(), "cachedb.sqlite3")
         self._lock = threading.Lock()
         self._conn = None
         self._cursor = None

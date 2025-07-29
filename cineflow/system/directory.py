@@ -5,10 +5,10 @@ import shutil
 import time
 import re
 from pathlib import Path
-from system.image import ImageHandler
-from system.logger import log
-from system.misc import sanitize_name
-from bases.worker import WorkerBase
+from cineflow.system.image import ImageHandler
+from cineflow.system.logger import log
+from cineflow.system.misc import sanitize_name
+from cineflow.bases.worker import WorkerBase
 
 
 class DirectoryHandler(WorkerBase):

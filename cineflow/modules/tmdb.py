@@ -1,8 +1,8 @@
 """TMDB API consumer class"""
 
 from typing import List, Any
-from system.logger import log
-from bases.module import ConsumerBase
+from cineflow.system.logger import log
+from cineflow.bases.module import ConsumerBase
 
 
 class Tmdb(ConsumerBase):

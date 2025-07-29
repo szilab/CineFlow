@@ -67,7 +67,7 @@ def load_module(name: str) -> object:
         if not str(file).endswith(".py") or str(file).startswith("__"):
             continue
         if name == str(file.name)[:-3]:
-            module_obj = importlib.import_module(f"modules.{name}")
+            module_obj = importlib.import_module(f"cineflow.modules.{name}")
             class_name = f"{name[0].capitalize()}{name[1:]}"
             if hasattr(module_obj, class_name):
                 return getattr(module_obj, class_name)

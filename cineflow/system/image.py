@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 import requests
 from PIL import Image, ImageOps, ImageDraw, UnidentifiedImageError
-from system.logger import log
+from cineflow.system.logger import log
 
 
 @dataclass
