@@ -65,7 +65,7 @@ setup(
         ],
     },
     # Python version requirement
-    python_requires='>=3.13',
+    python_requires='>=3.10',
     # Dependencies
     install_requires=read_requirements(),
     # Console scripts / entry points
