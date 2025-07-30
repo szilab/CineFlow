@@ -54,7 +54,7 @@ docker run -d \
   --restart unless-stopped \
   -v /path/to/your/library:/library \
   -v /path/to/your/config:/config \
-  sandorszilagyi/cineflow:latest
+  ghcr.io/szilab/cineflow:latest
 ```
 
 ### Option 2: From GitHub Releases
@@ -97,7 +97,7 @@ jellyfin:
 transmission:
   url:         # Transmission web UI URL
   user:        # Authentication for Transmission     -OPTIONAL-
-  password:   # Authentication for Transmission     -OPTIONAL-
+  password:    # Authentication for Transmission     -OPTIONAL-
 
 library:
   rules:
@@ -154,7 +154,7 @@ LOG_LEVEL=DEBUG cineflow
 # Using docker-compose
 services:
   cineflow:
-    image: sandorszilagyi/cineflow:latest
+    image: ghcr.io/szilab/cineflow:latest
     container_name: cineflow
     restart: unless-stopped
     volumes:

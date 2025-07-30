@@ -14,18 +14,19 @@ VERSION=$(get_version)
 # Determine environment and set appropriate tags
 if [ -n "$GITHUB_ACTIONS" ]; then
     # Running in GitHub Actions
+    REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"  # Lowercase owner name
     if [ "$GITHUB_REF" = "refs/heads/master" ] || [ "$GITHUB_REF" = "refs/heads/main" ]; then
         # Master/Main branch - production tags
-        TAGS="-t cineflow:$VERSION -t cineflow:latest"
+        TAGS="-t $REGISTRY/cineflow:$VERSION -t $REGISTRY/cineflow:latest"
         ENV_INFO="production (master/main branch)"
     elif [ "$GITHUB_REF" = "refs/heads/develop" ]; then
         # Develop branch - development tags
-        TAGS="-t cineflow:dev-$VERSION"
+        TAGS="-t $REGISTRY/cineflow:dev-$VERSION"
         ENV_INFO="development (develop branch)"
     else
         # Other branches - branch-specific tags
         BRANCH_NAME=$(echo "$GITHUB_REF" | sed 's/refs\/heads\///')
-        TAGS="-t cineflow:branch-$BRANCH_NAME-$VERSION"
+        TAGS="-t $REGISTRY/cineflow:branch-$BRANCH_NAME-$VERSION"
         ENV_INFO="branch build ($BRANCH_NAME)"
     fi
 else

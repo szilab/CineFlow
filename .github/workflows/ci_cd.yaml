@@ -78,6 +78,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Download build artifacts
@@ -85,11 +88,12 @@ jobs:
         with:
           name: python-packages
           path: dist/
-      - name: Log in to Docker Hub
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Make scripts executable
         run: chmod +x .github/scripts/*.sh
       - name: Build and push Docker image
@@ -97,8 +101,11 @@ jobs:
           ./.github/scripts/docker-build.sh
           VERSION=$(cat VERSION)
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            docker push cineflow:$VERSION
-            docker push cineflow:latest
+            docker tag cineflow:$VERSION ghcr.io/${{ github.repository_owner }}/cineflow:$VERSION
+            docker tag cineflow:latest ghcr.io/${{ github.repository_owner }}/cineflow:latest
+            docker push ghcr.io/${{ github.repository_owner }}/cineflow:$VERSION
+            docker push ghcr.io/${{ github.repository_owner }}/cineflow:latest
           elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
-            docker push cineflow:dev-$VERSION
+            docker tag cineflow:dev-$VERSION ghcr.io/${{ github.repository_owner }}/cineflow:dev-$VERSION
+            docker push ghcr.io/${{ github.repository_owner }}/cineflow:dev-$VERSION
           fi
