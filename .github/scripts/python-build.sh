@@ -2,38 +2,25 @@
 
 set -e
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-source "$SCRIPT_DIR/utils.sh"
+source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/utils.sh"
 
 print_header "🔧 Starting CineFlow Python Build"
 
-ensure_project_root
-
-export VERSION=$(get_version)
-
-install_base_deps
 install_dev_deps
-
+install_base_deps
 clean_build
 
-
-echo ""
-echo "📦 Building packages..."
-echo "========================"
+print_header "📦 Building packages..."
 
 if python -m build; then
     print_status "Build completed successfully"
+    ls -la dist/
 else
     print_error "Build failed"
     exit 1
 fi
 
-ls -la dist/
-
-
-echo ""
-echo "🔍 Checking distribution packages..."
-echo "====================================="
+print_header "🔍 Checking distribution packages..."
 
 if twine check dist/*; then
     print_status "Distribution packages are valid"
@@ -42,7 +29,5 @@ else
     exit 1
 fi
 
-
-echo ""
-print_status "Build completed successfully! 🎉"
+print_status "🎉 Build completed successfully!"
 clean_build

@@ -98,14 +98,4 @@ jobs:
         run: chmod +x .github/scripts/*.sh
       - name: Build and push Docker image
         run: |
-          ./.github/scripts/docker-build.sh
-          VERSION=$(cat VERSION)
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            docker tag cineflow:$VERSION ghcr.io/${{ github.repository_owner }}/cineflow:$VERSION
-            docker tag cineflow:latest ghcr.io/${{ github.repository_owner }}/cineflow:latest
-            docker push ghcr.io/${{ github.repository_owner }}/cineflow:$VERSION
-            docker push ghcr.io/${{ github.repository_owner }}/cineflow:latest
-          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
-            docker tag cineflow:dev-$VERSION ghcr.io/${{ github.repository_owner }}/cineflow:dev-$VERSION
-            docker push ghcr.io/${{ github.repository_owner }}/cineflow:dev-$VERSION
-          fi
+          ./.github/scripts/docker-build.sh --push

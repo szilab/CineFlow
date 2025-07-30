@@ -2,21 +2,16 @@
 
 set -e
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-source "$SCRIPT_DIR/utils.sh"
+source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/utils.sh"
 
 print_header "🧪 Starting CineFlow Tests"
 
-ensure_project_root
 install_dev_deps
 install_base_deps
+clean_build
 
+print_header "🔍 Running linters..."
 
-echo ""
-echo "🔍 Running linters..."
-echo "===================="
-
-echo "Running flake8..."
 if flake8 . --count --max-complexity=10 --max-line-length=120 --statistics --exclude .venv; then
     print_status "Flake8 passed"
 else
@@ -24,8 +19,6 @@ else
     exit 1
 fi
 
-echo ""
-echo "Running pylint..."
 if pylint $(find "./$PYTHON_PACKAGE" -name "*.py") -d="E0401,F0001,C0116" --max-line-length=120 2>/dev/null; then
     print_status "Pylint passed"
 else
@@ -33,10 +26,7 @@ else
     exit 1
 fi
 
-
-echo ""
-echo "🔧 Testing setup.py..."
-echo "====================="
+print_header "🔧 Testing setup.py..."
 
 if python setup.py check --metadata --strict; then
     print_status "Setup.py metadata check passed"
@@ -52,10 +42,7 @@ else
     exit 1
 fi
 
-
-echo ""
-echo "📦 Testing package installation..."
-echo "================================="
+print_header "📦 Testing package installation..."
 
 if pip install -e .; then
     print_status "Package installation successful"
@@ -64,7 +51,6 @@ else
     exit 1
 fi
 
-echo "Testing imports..."
 if python -c "import $PYTHON_PACKAGE.main; print('Main module imported successfully')"; then
     print_status "Import test passed"
 else
@@ -72,10 +58,7 @@ else
     exit 1
 fi
 
-
-echo ""
-echo "🧪 Running pytest..."
-echo "==================="
+print_header "🧪 Running pytest..."
 
 if [ -d "tests" ]; then
     if pytest tests/ -v --cov=. --cov-report=xml --cov-report=term; then
@@ -88,7 +71,5 @@ else
     print_warning "No tests directory found, skipping pytest"
 fi
 
-clean_build
-
-echo ""
 print_status "All tests completed successfully! 🎉"
+clean_build

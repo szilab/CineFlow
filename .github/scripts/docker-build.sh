@@ -2,65 +2,43 @@
 
 set -e
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-source "$SCRIPT_DIR/utils.sh"
+source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/utils.sh"
 
-print_header "🐳 Building Docker Image"
+print_header "🐳 Building Docker Image for $VERSION"
 
-ensure_project_root
-
-VERSION=$(get_version)
-
-# Determine environment and set appropriate tags
-if [ -n "$GITHUB_ACTIONS" ]; then
-    # Running in GitHub Actions
-    REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"  # Lowercase owner name
-    if [ "$GITHUB_REF" = "refs/heads/master" ] || [ "$GITHUB_REF" = "refs/heads/main" ]; then
-        # Master/Main branch - production tags
-        TAGS="-t $REGISTRY/cineflow:$VERSION -t $REGISTRY/cineflow:latest"
-        ENV_INFO="production (master/main branch)"
-    elif [ "$GITHUB_REF" = "refs/heads/develop" ]; then
-        # Develop branch - development tags
-        TAGS="-t $REGISTRY/cineflow:dev-$VERSION"
-        ENV_INFO="development (develop branch)"
-    else
-        # Other branches - branch-specific tags
-        BRANCH_NAME=$(echo "$GITHUB_REF" | sed 's/refs\/heads\///')
-        TAGS="-t $REGISTRY/cineflow:branch-$BRANCH_NAME-$VERSION"
-        ENV_INFO="branch build ($BRANCH_NAME)"
-    fi
-else
-    # Running locally
-    TAGS="-t cineflow:local -t cineflow:local-$VERSION"
-    ENV_INFO="local development"
-fi
-
-print_info "Building CineFlow Docker image version: $VERSION"
-print_info "Environment: $ENV_INFO"
-print_info "Tags: $(echo $TAGS | sed 's/-t //g')"
-
-if [ ! -d "dist" ] || [ -z "$(ls -A dist/$PYTHON_PACKAGE-$VERSION-py3-none-any.whl 2>/dev/null)" ]; then
-    print_warning "No wheel file found. Building first..."
+if [ ! -f "$WHEEL_FILE" ]; then
     ./.github/scripts/python-build.sh
-    if [ ! -d "dist" ] || [ -z "$(ls -A dist/$PYTHON_PACKAGE-$VERSION-py3-none-any.whl 2>/dev/null)" ]; then
-        print_error "Failed to build wheel file. Please check the build script."
-        exit 1
-    fi
+fi
+if [ ! -f "$WHEEL_FILE" ]; then
+    print_error "Failed to build wheel file. Please check the build script."
+    exit 1
 fi
 
-print_info "Using wheel file match to -> dist/$PYTHON_PACKAGE-$VERSION-*-any.whl"
-ls dist/$PYTHON_PACKAGE-$VERSION-*-any.whl
-
-# Build Docker image
 docker build \
     --no-cache \
     --build-arg APP_VERSION="$VERSION" \
     --build-arg PYTHON_PACKAGE="$PYTHON_PACKAGE" \
     --build-arg WHEEL_FILE="$PYTHON_PACKAGE-$VERSION-py3-none-any.whl" \
-    $TAGS \
+    -t $PYTHON_PACKAGE:local-$VERSION \
     -f "docker/Dockerfile" \
     .
 
-print_status "Docker image built successfully!"
-print_info "Environment: $ENV_INFO"
-print_info "Tags created: $(echo $TAGS | sed 's/-t //g')"
+if [ $? -ne 0 ]; then
+    print_error "Docker build failed. Please check the Dockerfile and build context."
+    exit 1
+fi
+
+print_info "Local docker image '$PYTHON_PACKAGE:local-$VERSION' built successfully!"
+
+if [ -n "$GITHUB_ACTIONS" ]; then
+    REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+    if [ "$GITHUB_REF" = "refs/heads/master" ] || [ "$GITHUB_REF" = "refs/heads/main" ]; then
+        docker tag $PYTHON_PACKAGE:local-$VERSION $REGISTRY/$PYTHON_PACKAGE:$VERSION
+        docker push $REGISTRY/$PYTHON_PACKAGE:$VERSION
+        print_info "Docker image tagged and pushed to '$REGISTRY/$PYTHON_PACKAGE:$VERSION'"
+    elif [ "$GITHUB_REF" = "refs/heads/develop" ]; then
+        docker tag $PYTHON_PACKAGE:local-$VERSION $REGISTRY/$PYTHON_PACKAGE:dev-$VERSION
+        docker push $REGISTRY/$PYTHON_PACKAGE:dev-$VERSION
+        print_info "Docker image tagged and pushed to '$REGISTRY/$PYTHON_PACKAGE:dev-$VERSION'"
+    fi
+fi
