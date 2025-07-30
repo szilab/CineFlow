@@ -44,7 +44,7 @@ class Jellyfin(ConsumerBase):
             results = self._inverse_items(query_items=self._get_items(query=query))
         else:
             results = self._get_items(query=query)
-        return {item['jellyfinid']: item for item in results}.values()
+        return list({item['jellyfinid']: item for item in results}.values())
 
     def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:  # pylint: disable=arguments-differ
         """Search media for the given title."""

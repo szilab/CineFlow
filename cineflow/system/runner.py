@@ -38,11 +38,14 @@ class FlowManager(WorkerBase):
             if file not in self._flows:
                 self._flows[file] = Flow(file)
         # remove deleted flows
+        keys_to_remove = []
         for key, flow in self._flows.items():
             if key not in files:
                 log(f"Flow '{flow.name}' removed from the system.", level="INFO")
-                self._flows.pop(key)
-                del flow
+                keys_to_remove.append(key)
+        for key in keys_to_remove:
+            flow = self._flows.pop(key)
+            del flow
 
     def close(self) -> None:
         """Close the flow manager."""
@@ -76,18 +79,18 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods
         for step in self.steps:
             log(f"Start step '{step.get('name')}'", level="MSG")
             outp = None
-            # try:
-            if not (inst := self._load_module(step=step)):
+            try:
+                if not (inst := self._load_module(step=step)):
+                    return
+                if not (action := self._load_action(inst=inst, step=step)):
+                    return
+                if not (inp := self._load_input(step=step)):
+                    log(f"No input data for step '{step.get('name')}'.")
+                outp = self._call_action(action=action, inp=inp)
+            except (ValueError, TypeError) as exc:
+                log(f"Stop flow, error calling action '{step}': {exc}", level="ERROR")
+                # log (f"Parameters: {inp}")
                 return
-            if not (action := self._load_action(inst=inst, step=step)):
-                return
-            if not (inp := self._load_input(step=step)):
-                log(f"No input data for step '{step.get('name')}'.")
-            outp = self._call_action(action=action, inp=inp)
-            # except (ValueError, TypeError) as exc:
-            #     log(f"Stop flow, error calling action '{step}': {exc}", level="ERROR")
-            #     # log (f"Parameters: {inp}")
-            #     return
             # if outp:
             if step.get("name"):
                 self._outputs[step.get("name")] = outp

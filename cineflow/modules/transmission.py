@@ -114,7 +114,8 @@ class Transmission(ConsumerBase):
             data={'method': 'session-set'},
             auth=self._auth
         )
-        if not response.headers.get('X-Transmission-Session-Id'):
+        session_id = response.headers.get('X-Transmission-Session-Id')
+        if not session_id:
             raise ValueError(f"Failed to get session ID: {response.status}")
         log("Transmission session ID retrieved.")
-        return response.headers.get('X-Transmission-Session-Id')
+        return session_id

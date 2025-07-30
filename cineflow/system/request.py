@@ -67,12 +67,12 @@ class RequestHandler:
                 timeout=int(os.environ.get('REQUEST_TIMEOUT', '15')),
                 **kwargs
             )
-            if not self.ok_statuses:
+            if not self._ok_statuses:
                 response.raise_for_status()
         except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
             log(f"Request error '{full_url}': {e}", level='WARNING')
             return RequestResponse(data=None, status=0, cookies={}, headers={})
-        if self._ok_statuses and response.status_code not in self.ok_statuses:
+        if self._ok_statuses and response.status_code not in self._ok_statuses:
             log(f"Unexpected status code {response.status_code} for '{full_url}'", level='WARNING')
             return RequestResponse(data=None, status=response.status_code, cookies={}, headers={})
         if not response.content:
