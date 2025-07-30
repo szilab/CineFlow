@@ -1,0 +1,19 @@
+name: Jellyfin to Transmission
+delay: 60
+steps:
+  - name: Collect Jellyfin favorites
+    module: jellyfin
+    action: get
+    input:
+      query:
+        parentLibrary: Request
+        isFavorite: true
+        allUsers: true
+  - name: Add Jackett data
+    module: jackett
+    action: enrich
+    input: previous
+  - name: Add to Transmission
+    module: transmission
+    action: put
+    input: previous

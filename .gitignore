@@ -1,5 +1,9 @@
 /.vscode
+/.venv
+/build
+/dist
+*.egg-info
+*.egg
+*.whl
+*.pyc
 **/__pycache__
-/data
-/rest
-/start.cmd

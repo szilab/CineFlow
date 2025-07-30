@@ -1,0 +1,13 @@
+library:
+  rules:
+  - expression: missing
+    modification: grayscale
+    property: link
+  - expression: exists
+    modification: border
+    property: link
+  - case_sensitive: false
+    expression: contains
+    modification: triangle
+    property: torrent
+    value: hun

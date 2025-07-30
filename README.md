@@ -1,113 +1,214 @@
-CineFlow is an open-source software application for discovering and watching movies. Mostly inspired by [Overseerr](https://overseerr.dev) and [Jellyseerr](https://docs.jellyseerr.dev) however, it does not provide the same functionality and way of working.
-
 # CineFlow
 
-This project is a media management system that automates the collection of media information from various sources. It supports integration with multiple 3rd party applications implemented as modules, such as Jackett, Jellyfin, TMDb, and qBittorrent currently.
+[![CI/CD Pipeline](https://github.com/szilab/CineFlow/actions/workflows/ci_cd.yaml/badge.svg)](https://github.com/szilab/CineFlow/actions/workflows/ci_cd.yaml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Current Features
+CineFlow is an open-source media automation system for discovering, managing, and organizing your movie collection. Inspired by [Overseerr](https://overseerr.dev) and [Jellyseerr](https://docs.jellyseerr.dev), CineFlow provides a streamlined approach to media management with support for multiple third-party integrations.
 
-- Show available and trending media in your media server
-- Download media directly from your media server
-- Support and use the following 3rd parties
-  - [TMDb](https://www.themoviedb.org),
-  - [Jackett](https://github.com/Jackett/Jackett)
-  - [Jellyfin](https://jellyfin.org)
-  - [qBittorrent](https://www.qbittorrent.org)
+## Features
+
+### Current Capabilities
+- **Automated Media Discovery**: Collect trending and popular movies
+- **Search Integration**: Find downloadable content through Jackett
+- **Media Server Integration**: Sync with Jellyfin libraries
+- **Download Management**: Automatic downloading via Transmission
+- **Smart Library Management**: Create and maintain dummy libraries for preview
+- **Visual Enhancements**: Custom poster modifications with status indicators
+- **Flexible Configuration**: YAML configuration support
+
+### Supported Integrations
+- **[TMDb](https://www.themoviedb.org)** - Movie database and metadata
+- **[Jackett](https://github.com/Jackett/Jackett)** - Torrent indexer aggregation
+- **[Jellyfin](https://jellyfin.org)** - Media server integration
+- **[Transmission](https://transmissionbt.com)** - Download client
+
+## How It Works
+
+1. **Discovery**: Periodically collects trending media from TMDb
+2. **Indexing**: Searches for available downloads through Jackett
+3. **Library Management**: Creates dummy entries in your media library
+4. **Visual Indicators**: Modifies posters to show availability status:
+   - Grayscale for unavailable content
+   - Colored borders for specific qualities (HDR, resolution, etc.)
+5. **Automation**: Downloads favorited items and removes completed downloads from dummy library
+
+![Jellyfin Integration Screenshot](docs/jellyfin_screen_1.png)
 
 ## Prerequisites
 
-- Own Jackett instance with your tracker
-- TMDb API, which you can request here: https://www.themoviedb.org/settings/api
-- Your own Jellyfin instance
-- qBittorrent installation
+- Python >= 3.10 or Docker
+- TMDb API key ([Request here](https://www.themoviedb.org/settings/api))
+- Jackett instance with configured trackers
+- Jellyfin media server
+- Transmission download client
 
-## How it is working
+## Installation
 
-  - Collect trending media periodically from TMDb
-  - Collect the latest items periodically from Jackett
-  - Manage a library in your disk with dummy items from the collected media
-  - This can be used as a media library in your media server
-  - Marked items (favorites) added to your download manager
-  - Downloaded and already owned items (based on the media server) removed from the library
-  - Library posters can be modified to show extra info like:
-    - Items without a download link will be grayscale
-    - Can add a colored border if a world is present in the tracker data, like resolution or language
+### Option 1: Docker (Recommended)
 
-![Jellyfin screenshot](docs/jellyfin_screen_1.png)
-
-
-## Getting Started
-
-### Run the application
-
-1.) Create a folder where you want to export items add the 'movie' subfolder in Jellyfin as movie library
-
-2.) Create you config.json based on this example:
-  ```json
-    {
-        "refresh": {
-            "movies": true
-        },
-        "tmdb": {
-            "key": "your_tmdb_api_key",
-            "lang": "en-US"
-        },
-        "jackett": {
-            "url": "http://192.your.jackett.ip:9117",
-            "key": "your_jackett_api_key",
-            "include": "1080p",
-            "categories": "2040"
-        },
-        "jellyfin": {
-            "url": "http://192.your.jellyfin.ip:8096",
-            "key": "your_jellyfin_api_key",
-            "user": "jellyfin_username",
-            "libraries": "Library_Name_from_point_1,"
-        },
-        "poster": {
-            "rules": ["HDR|hdr|=green"]
-        },
-        "downloader": {
-            "url": "http://191.your.qbittorrent.webui:8080",
-            "user": "username",
-            "passw": "password",
-            "savepath": "/downloads/folder"
-        }
-    }
-  ```
-
-The following parameters optional:
-- tmdb.lang (default is en-US)
-- jackett.include
-- jackett.categories (default is 2000)
-- poster.rules
-
-3.) Start the application
-
-- Run as a container
-```sh
+```bash
+# Pull and run the latest version
 docker run -d \
---name cineflow \
---restart unless-stopped \
--v your_library_path:/data \
--v location_of/config.json:/data/config.json \
-sandorszilagyi/cineflow
+  --name cineflow \
+  --restart unless-stopped \
+  -v /path/to/your/library:/library \
+  -v /path/to/your/config:/config \
+  ghcr.io/szilab/cineflow:latest
 ```
 
-- Run on Windows (PowerShell) require Python 3.x and Git
-```PowerShell
-# Get the applicatiom
-git clone https://github.com/huszilagyisandor/CineFlow.git
-cd CineFlow
-pip install -r requirements.txt
+### Option 2: From GitHub Releases
 
-# Run
-$env:DATA_DIR="location_of_config.json"
-$env:LIBRARY_PATH="your_library_path"
-python3 main.py
+Download the latest wheel file from [Releases](https://github.com/szilab/CineFlow/releases):
+
+```bash
+pip install cineflow-*.whl
+export CFG_DIRECTORY="/path/to/your/config"
+export EXPORT_DIRECTORY="/path/to/your/library"
+cineflow
 ```
 
+## Configuration
+
+CineFlow uses a dual configuration system:
+1. **Global Configuration** (`config.yaml`) - System-wide settings for modules
+2. **Flow Configuration** (`.yaml` files) - Workflow definitions and automation logic
+
+### Global Configuration (config.yaml)
+
+Create `config.yaml` in your configuration directory with system-wide settings:
+
+#### Required Settings
+```yaml
+tmdb:
+  token:       # Your TMDb API key
+  lang:        # Language code (default: "en-US")     -OPTIONAL-
+
+jackett:
+  url:         # Jackett instance URL
+  token:       # Jackett API key
+  include:     # Filter results by keywords           -OPTIONAL-
+  categories:  # Torrent categories (default: "2000") -OPTIONAL-
+
+jellyfin:
+  url:         # Jellyfin server URL
+  token:       # Jellyfin API key
+
+transmission:
+  url:         # Transmission web UI URL
+  user:        # Authentication for Transmission     -OPTIONAL-
+  password:    # Authentication for Transmission     -OPTIONAL-
+
+library:
+  rules:
+  - expression: missing
+    modification: grayscale
+    property: link
+  - expression: exists
+    modification: border
+    property: link
+  - case_sensitive: false
+    expression: contains
+    modification: triangle
+    property: torrent
+    value: HDR
+```
+
+### Environment Variables
+
+- `CFG_DIRECTORY`: Configuration directory path
+- `EXPORT_DIRECTORY`: Library export path
+- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
+- `LOG_COLORS`: Enable colored logs (true/false)
+
+Any setting from `config.yaml` can be overridden via environment variables using the format `MODULENAME_SETTING` (e.g., `TMDB_TOKEN`, `JELLYFIN_URL`) handy for simple setups with Docker.
+
+### Flow Configuration
+
+CineFlow's automation is driven by **flow files** - YAML configurations that define step-by-step workflows. The system automatically discovers and runs any `.yaml` files in your configuration directory (except `config.yaml`).
+
+CineFlow includes ready-to-use flow files in `docker/examples` directory these files automatically copied to an empty config folder when run via Docker.
+
+### Advanced Configuration and Custom Flows
+
+Please see [Configuration Guide](docs/CONFIGURATION.md) for details.
+
+## Usage
+
+### Command Line Interface
+
+```bash
+# Start CineFlow
+cineflow
+
+# With custom config location
+CFG_DIRECTORY=/path/to/config cineflow
+
+# With debug logging
+LOG_LEVEL=DEBUG cineflow
+```
+
+### Docker Usage
+
+```bash
+# Using docker-compose
+services:
+  cineflow:
+    image: ghcr.io/szilab/cineflow:latest
+    container_name: cineflow
+    restart: unless-stopped
+    volumes:
+      - /path/to/library:/data
+      - /path/to/config:/config
+    environment:
+      - CFG_DIRECTORY=/config
+      - EXPORT_DIRECTORY=/data
+      - LOG_LEVEL=INFO
+      - TMDB_TOKEN=d56d...
+```
+
+## Project Structure
+
+```
+cineflow/
+├── bases/           # Base classes and utilities
+├── modules/         # Third-party integrations
+│   ├── jackett.py   # Jackett integration
+│   ├── jellyfin.py  # Jellyfin integration
+│   ├── tmdb.py      # TMDb integration
+│   └── transmission.py # Transmission integration
+├── system/          # Core system components
+│   ├── config.py    # Configuration management
+│   ├── database.py  # Database operations
+│   ├── logger.py    # Logging system
+│   └── misc.py      # Utility functions
+└── main.py          # Application entry point
+```
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.md) for details on how to get started.
+
+## Roadmap
+
+- [ ] TV Series support
+- [ ] Web UI interface
+- [ ] Additional downloader support (qBittorrent, etc.)
+- [ ] Additional media server support (Plex)
+- [ ] Advanced filtering and scheduling
+- [ ] Notification system
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+- 📚 [Documentation](https://github.com/szilab/CineFlow/wiki)
+- 🐛 [Issue Tracker](https://github.com/szilab/CineFlow/issues)
+- 💬 [Discussions](https://github.com/szilab/CineFlow/discussions)
+
+## Acknowledgments
+
+- Inspired by [Overseerr](https://overseerr.dev) and [Jellyseerr](https://docs.jellyseerr.dev)
+- Self-hosted community
