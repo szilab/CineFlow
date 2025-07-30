@@ -4,6 +4,7 @@ import os
 import shutil
 import time
 import re
+import platform
 from pathlib import Path
 from cineflow.system.image import ImageHandler
 from cineflow.system.logger import log
@@ -80,7 +81,7 @@ class DirectoryHandler(WorkerBase):
         if not (dir_list := self.all()):
             return
         # Sort by creation time, newest first
-        dir_list.sort(key=lambda x: Path(x).stat().st_birthtime, reverse=True)
+        dir_list.sort(key=lambda x: Path(x).stat().st_ctime, reverse=True)
         i = 1
         for item in dir_list:
             try:
@@ -90,7 +91,7 @@ class DirectoryHandler(WorkerBase):
                     self.remove(item)
                     continue
                 # Check if the item is older than the maximum age
-                file_age = time.time() - Path(self._path / item).stat().st_birthtime
+                file_age = time.time() - Path(self._path / item).stat().st_ctime
                 if file_age > self.max_item_age * 24 * 60 * 60:
                     log(f"Found old item: {item}")
                     self.remove(item)

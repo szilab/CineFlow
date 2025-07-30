@@ -33,8 +33,6 @@ class Config(metaclass=SingletonMeta):
 
     def get(self, key: str, default=None):
         """Get a configuration value"""
-        if key.capitalize() in os.environ:
-            return os.environ[key.capitalize()]
         with self._lock:
             return self.getfrom(config=self._load(), key=key, default=default)
 
@@ -71,8 +69,10 @@ class Config(metaclass=SingletonMeta):
             log(f"Error saving config file '{os.path.basename(self._file)}': {e}", level="ERROR")
 
     @staticmethod
-    def getfrom(config: dict, key: str, default=None) -> Any:
+    def getfrom(config: dict, key: str, module: str = None, default: Any = None) -> Any:
         """Get a value from a given config dictionary"""
+        if module and f"{module}_{key}".upper() in os.environ:
+            return os.environ[f"{module}_{key}".upper()]
         if key in config:
             return config[key]
         for current_key in key.split("."):

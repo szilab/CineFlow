@@ -25,13 +25,13 @@ class ModuleBase():
         self._empty_property_allowed = False
         self._data_transforms = {}
         for key in required or []:
-            if key in self._cfg:
+            if self.cfg(key):
                 continue
             raise ValueError(f"Missing required module config '{self.name}.{key}'")
 
     def cfg(self, key: str, default=None) -> dict:
         """Return the module configuration."""
-        return Config.getfrom(self._cfg, key=key, default=default)
+        return Config.getfrom(self._cfg, key=key, module=self.name, default=default)
 
     def map(self, item: dict) -> dict:
         """Interpret the received item as the data structure."""
@@ -67,6 +67,9 @@ class ModuleBase():
                     if alias in item:
                         data[prop] = item[alias]
                         break
+            # apply any data transformations
+            if prop in self._data_transforms and data.get(prop):
+                data[prop] = self._data_transforms[prop](data[prop])
         return data
 
     @property

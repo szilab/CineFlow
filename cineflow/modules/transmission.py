@@ -55,7 +55,7 @@ class Transmission(ConsumerBase):
                     log(f"Skipping item '{item.get('name')}' invalid or not match.", level='DEBUG')
         return results
 
-    def search(self, title: str, year: int) -> List[dict]:  # pylint: disable=arguments-differ
+    def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:  # pylint: disable=arguments-differ
         """Search media for the given title in torrent list."""
         results = self.get(query=f"{sanitize_name(name=title)} {year}")
         return self.match(results=results, title=title, year=year)

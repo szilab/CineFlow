@@ -76,18 +76,18 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods
         for step in self.steps:
             log(f"Start step '{step.get('name')}'", level="MSG")
             outp = None
-            try:
-                if not (inst := self._load_module(step=step)):
-                    return
-                if not (action := self._load_action(inst=inst, step=step)):
-                    return
-                if not (inp := self._load_input(step=step)):
-                    log(f"No input data for step '{step.get('name')}'.")
-                outp = self._call_action(action=action, inp=inp)
-            except (ValueError, TypeError) as exc:
-                log(f"Stop flow, error calling action '{step}': {exc}", level="ERROR")
-                # log (f"Parameters: {inp}")
+            # try:
+            if not (inst := self._load_module(step=step)):
                 return
+            if not (action := self._load_action(inst=inst, step=step)):
+                return
+            if not (inp := self._load_input(step=step)):
+                log(f"No input data for step '{step.get('name')}'.")
+            outp = self._call_action(action=action, inp=inp)
+            # except (ValueError, TypeError) as exc:
+            #     log(f"Stop flow, error calling action '{step}': {exc}", level="ERROR")
+            #     # log (f"Parameters: {inp}")
+            #     return
             # if outp:
             if step.get("name"):
                 self._outputs[step.get("name")] = outp

@@ -41,7 +41,7 @@ class Jackett(ConsumerBase):
         results = self._get_results(query=query)
         return results[:self._limit] if results else []
 
-    def search(self, title: str, year: int) -> List[dict]:  # pylint: disable=arguments-differ
+    def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:  # pylint: disable=arguments-differ
         """Search torrents for the given title."""
         results = self._get_results(query=f"{sanitize_name(name=title)} {year}")
         return self.match(results=results, title=title, year=year)
@@ -49,11 +49,11 @@ class Jackett(ConsumerBase):
     def _get_results(self, query: Any = None) -> List[dict]:
         if not query:
             query = ''
-        query_include = self._cfg.get('include', '')
+        query_include = self.cfg('include', default='')
         response = self._handler.get(
             endpoint="/api/v2.0/indexers/all/results",
             params={
-                'apikey': self._cfg['token'],
+                'apikey': self.cfg('token'),
                 'Query': query if not query_include else f"{query} {query_include}",
                 'Category[]': self._category,
             }
