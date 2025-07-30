@@ -4,7 +4,6 @@ import os
 import shutil
 import time
 import re
-import platform
 from pathlib import Path
 from cineflow.system.image import ImageHandler
 from cineflow.system.logger import log
