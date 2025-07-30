@@ -19,6 +19,7 @@ class DirectoryHandler(WorkerBase):
     def __init__(self, directory: str) -> None:
         """Initialize the directory handler."""
         super().__init__()
+        self.delay = 360
         self._max_item_age = self.DEFAULT_MIN_ITEM_AGE
         self._max_item_count = self.DEFAULT_MIN_ITEM_COUNT
         if not directory:

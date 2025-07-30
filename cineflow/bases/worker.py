@@ -9,7 +9,7 @@ class WorkerBase(ABC):
     """Base class for workers."""
     def __init__(self):
         self._running = False
-        self._delay = 3
+        self._delay = 120
         self._thread = None
         self._first_run = True
         self._stop_event = Event()
