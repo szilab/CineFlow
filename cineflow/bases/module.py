@@ -43,7 +43,7 @@ class ModuleBase():
         # validate empty properties
         if not self._empty_property_allowed:
             for key, value in data.items():
-                if not value:
+                if value is None:
                     log(
                         f"Empty property '{key}' not allowed in {self.name} module.",
                         level='WARNING'
@@ -69,7 +69,8 @@ class ModuleBase():
                         break
             # apply any data transformations
             if prop in self._data_transforms and data.get(prop):
-                data[prop] = self._data_transforms[prop](data[prop])
+                prop_val = self._data_transforms[prop](data[prop])
+                data[prop] = prop_val
         return data
 
     @property
@@ -108,7 +109,8 @@ class ConsumerBase(ModuleBase, ABC):
             raise ValueError(f"Missing required module config '{self.name}.url'")
         self._handler = RequestHandler(url=self._url)
         self._kind = 'movie'
-        self._limit = self.cfg('limit', 20)
+        self._limit = self.cfg('limit', 100)
+        self._force_upd_fields = []
 
     @abstractmethod
     def get(self, query: Any = None) -> List[dict]:
@@ -122,23 +124,37 @@ class ConsumerBase(ModuleBase, ABC):
         self, results: List[Dict], title: str, year: int
     ) -> dict:
         """Match item from the results by title and year."""
+        if (
+            self.cfg('quick_match') and
+            len(results) == 1 and
+            results[0].get('year') == str(year)
+        ):
+            return results[0]
         for item in results or []:
             if (
                 str(item.get('year')) == str(year) and
-                sanitize_name(name=item.get('title')) == sanitize_name(name=title)
+                sanitize_name(name=item.get('title')).lower() == sanitize_name(name=title).lower()
             ):
                 return item
         return None
 
     def enrich(self, data: list[dict]) -> List[Dict]:
         """Extend the received data with module properties"""
+        to_return = []
         for item in data or []:
-            if local_match := self.search(title=item.get('title'), year=item.get('year'), tmdbid=item.get('tmdbid')):
+            if local_match := self.search(
+                title=item.get('title'),
+                year=item.get('year'),
+                tmdbid=item.get('tmdbid')
+            ):
                 self._update(original=item, updates=local_match)
+                to_return.append(item)
                 log(f"Item '{item.get('title')}' ({item.get('year')}) extended.")
             else:
-                log(f"No media found for '{item.get('title')}' ({item.get('year')})")
-        return data
+                if not self.cfg('must_match', default=False):
+                    to_return.append(item)
+                log(f"No media found for '{item.get('title')}' ({item.get('year')})", level='WARNING')
+        return to_return
 
     def unique(self, data: list[dict], query: Any = None) -> List[Dict]:
         """Return items from the received data wich ones are not in the queried items"""
@@ -160,6 +176,9 @@ class ConsumerBase(ModuleBase, ABC):
         for d in data:
             match = False
             for r in results:
+                if d.get('tmdbid') and r.get('tmdbid') and str(d.get('tmdbid')) == str(r.get('tmdbid')):
+                    match = True
+                    break
                 if d.get('title') == r.get('title') and d.get('year') == r.get('year'):
                     match = True
                     break
@@ -173,7 +192,7 @@ class ConsumerBase(ModuleBase, ABC):
     def _update(self, original: dict, updates: dict) -> dict:
         """Update the original dictionary with the updates."""
         for key, value in updates.items():
-            if key not in original:
+            if key not in original or key in self._force_upd_fields:
                 original[key] = value
         return original
 
@@ -236,5 +255,5 @@ class LibraryBase(ModuleBase):
         super().__init__(config=config, required=required)
         directory = directory or self.cfg('directory')
         self._handler = DirectoryHandler(directory=directory)
-        self._handler.max_item_count = self.cfg("limit", 50)
-        self._handler.max_item_age = self.cfg("age", 30)
+        self._handler.max_item_count = self.cfg("limit", 500)
+        self._handler.max_item_age = self.cfg("age", 120)

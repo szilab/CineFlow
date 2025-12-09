@@ -5,8 +5,13 @@ from pathlib import Path
 
 
 def sanitize_name(name: str, replace_with: str = "") -> str:
-    """Sanitize a directory or file name by removing invalid characters."""
-    return re.sub(r'[\\\/:\*\?"<>\|]', replace_with, name)
+    """Sanitize a name by removing invalid characters."""
+    return re.sub(r'[\.\\\/:\*\?"<>\|\'\-]', replace_with, str(name))
+
+
+def sanitize_path(name: str, replace_with: str = "") -> str:
+    """Sanitize a directory or file by removing invalid characters."""
+    return re.sub(r'[\\\/:\*\?"<>\|\']', replace_with, str(name))
 
 
 def sort_data(data: list, param: str, reverse: bool = False) -> list:
@@ -15,21 +20,38 @@ def sort_data(data: list, param: str, reverse: bool = False) -> list:
 
 
 def __title_groups(title: str) -> None:
+    title = title.replace(' ', '.')
     result = re.search(r'(.+)\.([12]\d\d\d)\.', title)
     if not result or len(groups := result.groups()) < 2:
         return None
     return groups
 
 
-def media_title(title: str) -> None:
+def media_title(title: str):
     if group := __title_groups(title):
         return group[0].replace('.', ' ').strip()
     return None
 
 
-def media_year(title: str) -> None:
+def media_year(title: str):
     if group := __title_groups(title):
         return group[1]
+    return None
+
+
+def media_resolution(title: str):
+    if '480p' in title.lower():
+        return '480p'
+    if '720p' in title.lower():
+        return '720p'
+    if '1080p' in title.lower():
+        return '1080p'
+    if '1440p' in title.lower():
+        return '1440p'
+    if '2160p' in title.lower():
+        return '2160p'
+    if '4320p' in title.lower():
+        return '4320p'
     return None
 
 

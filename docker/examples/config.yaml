@@ -1,4 +1,8 @@
+execution: sequential
+tmdb:
+  quick_match: true
 library:
+  directory: film
   rules:
   - expression: missing
     modification: grayscale
@@ -6,8 +10,10 @@ library:
   - expression: exists
     modification: border
     property: link
+    color: yellow
   - case_sensitive: false
     expression: contains
     modification: triangle
     property: torrent
     value: hun
+    color: yellow

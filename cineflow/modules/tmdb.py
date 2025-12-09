@@ -24,7 +24,8 @@ class Tmdb(ConsumerBase):
         super().__init__(url="https://api.themoviedb.org/3", config=config, required=['token'])
         self.cache_time = 10800
         self.mappings = {
-            'title': ['original_title'],
+            'title': ['title'],
+            'alttile': ['original_title'],
             'year': ['release_date', 'first_air_date'],
             'kind': ['media_type'],
             'tmdbid': ['id'],
@@ -38,6 +39,7 @@ class Tmdb(ConsumerBase):
             'api_key': self.cfg('token'),
             'language': self.cfg('language', 'en-US'),
         }
+        self._force_upd_fields = ['title']
 
     def get(self, query: Any = None) -> List[dict]:
         """Collect media from the TMDB API."""
@@ -77,7 +79,12 @@ class Tmdb(ConsumerBase):
         if not response.data or not isinstance(response.data, dict):
             return None
         results = []
-        for item in response.data.get('results', []):
+        resp_data = []
+        if response.data.get('results'):
+            resp_data = response.data.get('results')
+        elif response.data.get('id'):
+            resp_data = [response.data]
+        for item in resp_data:
             if media := self.map(item=item):
                 results.append(media)
         return self.match(results=results, title=title, year=year)

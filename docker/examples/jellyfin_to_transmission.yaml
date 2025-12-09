@@ -1,12 +1,13 @@
 name: Jellyfin to Transmission
 delay: 60
+priority: 10
 steps:
   - name: Collect Jellyfin favorites
     module: jellyfin
     action: get
     input:
       query:
-        parentLibrary: Request
+        parentLibrary: Trending
         isFavorite: true
         allUsers: true
   - name: Add Jackett data

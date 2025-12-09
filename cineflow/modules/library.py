@@ -47,7 +47,8 @@ class Library(LibraryBase):
                 continue
             results.append({'directory': directory.name})
         log(f"Items in library: '{len(results)}'")
-        return [self.map(item=item) for item in results]
+        data = [self.map(item=item) for item in results]
+        return data
 
     def put(self, data: List[Dict]) -> List[Dict]:
         """Import the media to the library."""
@@ -55,11 +56,11 @@ class Library(LibraryBase):
             item = self._item_name(media=media)
             if media.get('poster'):
                 image = self._create_poster(media=media)
+                if self._handler.make(item=item, image=image):
+                    media['directory'] = item
             else:
                 image = None
-                log(f"Item '{media['title']}' has no poster.", level='WARNING')
-            if self._handler.make(item=item, image=image):
-                media['directory'] = item
+                log(f"Item '{media['title']}' has no poster, skipped.", level='WARNING')
         return data
 
     def remove(self, data: List[Dict]) -> None:

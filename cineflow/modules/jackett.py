@@ -2,7 +2,8 @@
 
 from typing import List, Any
 from cineflow.bases.module import ConsumerBase
-from cineflow.system.misc import sort_data, sanitize_name, media_title, media_year
+from cineflow.system.misc import sort_data, sanitize_name, media_title, media_year, media_resolution
+from system.logger import log
 
 
 class Jackett(ConsumerBase):
@@ -30,10 +31,12 @@ class Jackett(ConsumerBase):
             'size': ['Size'],
             'torrent': ['Title'],
             'seeders': ['Seeders'],
+            'resolution': ['Title'],
         }
         self._data_transforms = {
             'title': media_title,
             'year': media_year,
+            'resolution': media_resolution,
         }
 
     def get(self, query: Any = None):
@@ -47,14 +50,17 @@ class Jackett(ConsumerBase):
         return self.match(results=results, title=title, year=year)
 
     def _get_results(self, query: Any = None) -> List[dict]:
-        if not query:
+        query, seed, resolution, exclude = self._parse_query(query)
+        if exclude:
+            exclude = query
             query = ''
-        query_include = self.cfg('include', default='')
+        if self.cfg('include'):
+            query += ' ' + self.cfg('include', default='')
         response = self._handler.get(
             endpoint="/api/v2.0/indexers/all/results",
             params={
                 'apikey': self.cfg('token'),
-                'Query': query if not query_include else f"{query} {query_include}",
+                'Query': query,
                 'Category[]': self._category,
             }
         )
@@ -64,4 +70,29 @@ class Jackett(ConsumerBase):
         for item in sort_data(response.data.get('Results', []), param="Seeders", reverse=True):
             if media := self.map(item=item):
                 results.append(media)
-        return results
+        if exclude:
+            results = [r for r in results if all(e.lower() not in r['title'].lower() for e in exclude.split(' '))]
+        if seed:
+            results = [r for r in results if r['seeders'] >= seed]
+        if resolution:
+            results = [r for r in results if r['resolution'] == resolution]
+        return self._remove_duplicates(results)
+
+    def _parse_query(self, query: Any) -> List[str, int, str, bool]:
+        if not query or query == '':
+            return '', 0, None, False
+        if isinstance(query, str):
+            return query, 0, None, False
+        if isinstance(query, dict):
+            return query.get('include', ''), query.get('seeders', 0), query.get('resolution', 0),  query.get('exclude', False)
+        log(f"Invalid query type: {type(query)}. Query must be a string or a dictionary. Skipp option!")
+        return '', 0, None, False
+
+    def _remove_duplicates(self, results: list):
+        unique_titles = set()
+        unique_results = []
+        for result in results:
+            if result['title'] not in unique_titles:
+                unique_results.append(result)
+                unique_titles.add(result['title'])
+        return unique_results

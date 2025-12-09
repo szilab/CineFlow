@@ -23,12 +23,15 @@ class Jellyfin(ConsumerBase):
         self.rate_limit = 0
         self.cache_time = 0
         self.mappings = {
-            'title': ['OriginalTitle', 'Name'],
+            'title': ['Name'],
+            'alttitle': ['OriginalTitle'],
             'year': ['ProductionYear', 'PremiereDate'],
             'jellyfinid': ['Id'],
+            'tmdbid': ['ProviderIds'],
         }
         self.transforms = {
             "year": lambda x: str(x)[0:4],
+            "tmdbid": lambda x: dict(x).get('Tmdb')
         }
         self.params = {
             "ApiKey": self.cfg("token")
@@ -90,7 +93,7 @@ class Jellyfin(ConsumerBase):
             response = self._handler.get(
                 endpoint=f"/Users/{u}/Items" if u else "/Items",
                 params={
-                    "fields": "OriginalTitle,ParentId",
+                    "fields": "OriginalTitle,ParentId,ProviderIds",
                     "Recursive": "true",
                     "includeItemTypes": self._kind,
                     **(query or {}),
@@ -99,12 +102,17 @@ class Jellyfin(ConsumerBase):
             if not response.data or not response.data.get('Items'):
                 continue
             results.extend(response.data.get('Items'))
-        return [self.map(item=item) for item in results]
+        data = [self.map(item=item) for item in results]
+        return data
 
     def _inverse_items(self, query_items: List[dict]) -> List[dict]:
         all_items = self._get_items()
         query_ids = {item['jellyfinid'] for item in query_items}
-        return [item for item in all_items if item['jellyfinid'] not in query_ids]
+        not_in_query = []
+        for item in all_items:
+            if item and item['jellyfinid'] not in query_ids:
+                not_in_query.append(item)
+        return not_in_query
 
     def _get_users(self):
         response = self._handler.get(

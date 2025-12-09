@@ -1,25 +1,7 @@
 name: TMDb to Jellyfin
 delay: 60
+priority: 1
 steps:
-  - name: Load from library
-    module: library
-    action: get
-    config:
-      directory: film
-  - name: Filter out Jellyfin not existing
-    module: jellyfin
-    action: common
-    input:
-      query:
-        parentLibrary: Request
-        isInverse: true
-      data: previous
-  - name: Delete from library
-    module: library
-    action: remove
-    input: previous
-    config:
-      directory: film
   - name: Collect from TMDB
     module: tmdb
     action: get
@@ -27,17 +9,17 @@ steps:
     module: jackett
     action: enrich
     input: previous
-  - name: Filter out Jellyfin not existing
+    config:
+      must_match: true
+  - name: Filter out Jellyfin existing
     module: jellyfin
     action: unique
     input:
       query:
-        parentLibrary: Request
+        parentLibrary: Trending
         isInverse: true
       data: previous
   - name: Export to library
     module: library
     action: put
     input: previous
-    config:
-      directory: film

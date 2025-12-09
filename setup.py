@@ -22,14 +22,14 @@ def read_version():
         return os.getenv('VERSION')
     version_file = os.path.join(os.path.dirname(__file__), 'VERSION')
     if os.path.exists(version_file):
-        with open(version_file, "r") as f:
+        with open(version_file, "r", encoding='utf8') as f:
             return f.read().strip()
     return '0.0.1'
 
 
 def readme():
     try:
-        with open('README.md') as f:
+        with open('README.md', "r", encoding="utf8") as f:
             return f.read()
     except FileNotFoundError:
         return f"Cannot find README.md, please visit '{REPOSITORY_URL}' ."

@@ -4,6 +4,7 @@ import os
 from typing import Any
 import inspect
 import yaml
+from system.config import cfg
 from cineflow.bases.module import ModuleBase
 from cineflow.bases.worker import WorkerBase
 from cineflow.system.logger import log
@@ -18,34 +19,50 @@ class FlowManager(WorkerBase):
         super().__init__()
         self._dir = os.environ.get("CFG_DIRECTORY", "/config")
         self._flows = {}
+        self._exec_mode = cfg('execution', default='parallel')
         if os.path.exists(self._dir):
             self.start()
 
     def run(self) -> None:
         """Run the flow manager."""
         files = []
-        for file in os.listdir(self._dir):
-            if os.path.isdir(file) or file == "config.yaml":
+        for filename in os.listdir(self._dir):
+            file_path = os.path.join(self._dir, filename)
+            if os.path.isdir(file_path) or filename == "config.yaml":
                 continue
-            if file.endswith('.yaml') or file.endswith('.yml'):
-                files.append(os.path.join(self._dir, file))
-            log(f"Skipping non-YAML file: {file}")
+            if filename.endswith(('.yaml', '.yml')):
+                files.append(file_path)
+            else:
+                log(f"Skipping non-YAML file: {filename}")
+
         if not files:
             log("No flow files found to run.", level="INFO")
             return
+
         # add new flows
         for file in files:
             if file not in self._flows:
-                self._flows[file] = Flow(file)
+                flow = Flow(file)
+                self._flows[file] = flow
+                if self._exec_mode == 'parallel':
+                    flow.start()
+
         # remove deleted flows
         keys_to_remove = []
         for key, flow in self._flows.items():
             if key not in files:
                 log(f"Flow '{flow.name}' removed from the system.", level="INFO")
+                flow.stop()
                 keys_to_remove.append(key)
         for key in keys_to_remove:
             flow = self._flows.pop(key)
             del flow
+
+        if self._exec_mode == 'sequential':
+            log("Sequential flow execution started.", level="INFO")
+            sorted_flows = sorted(self._flows.values(), key=lambda f: f.priority)
+            for flow in sorted_flows:
+                flow.run()
 
     def close(self) -> None:
         """Close the flow manager."""
@@ -64,16 +81,18 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods
         self._filename = os.path.basename(file)
         self.name = 'Unnamed Flow'
         self.steps = []
+        self.priority = 99
         self.delay = 60
         self._mod_cache = {}
         self._outputs = {}
-        log(f"Flow '{self._filename}' initialized.", level="INFO")
-        self.start()
+        self._valid = self._validate_flow()
+        if self._valid:
+            log(f"Flow '{self._filename}' initialized.", level="INFO")
 
     def run(self) -> None:
         """Run the flow."""
         super().run()
-        if not self._validate_flow():
+        if not self._valid:
             return
         log(f"Flow '{self.name}' from file '{self._filename}' started.", level="INFO")
         for step in self.steps:
@@ -88,10 +107,10 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods
                     log(f"No input data for step '{step.get('name')}'.")
                 outp = self._call_action(action=action, inp=inp)
             except (ValueError, TypeError) as exc:
-                log(f"Stop flow, error calling action '{step}': {exc}", level="ERROR")
+                log(f"Stop flow, error calling action '{step.get('name')}' -> {exc}", level="ERROR")
                 # log (f"Parameters: {inp}")
                 return
-            # if outp:
+            # # if outp:
             if step.get("name"):
                 self._outputs[step.get("name")] = outp
             self._outputs['latest'] = outp
@@ -161,6 +180,7 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods
                     self.name = data.get("name", self.name)
                     self.steps = data.get("steps", self.steps)
                     self.delay = data.get("delay", self.delay)
+                    self.priority = data.get("priority", self.priority)
             except yaml.YAMLError as exc:
                 log(f"Error loading flow file '{self._filename}': {exc}", level="WARNING")
 
