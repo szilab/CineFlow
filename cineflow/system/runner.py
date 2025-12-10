@@ -17,6 +17,15 @@ class FlowManager(WorkerBase):
     def __init__(self) -> None:
         """Initialize the task runner."""
         super().__init__()
+        try:
+            self._delay = int(os.environ.get("FM_RERESH_SEQ", 60))
+        except ValueError:
+            log(
+                "Invalid refresh sequence value in "
+                "'FM_RERESH_SEQ', using default 60s.",
+                level="WARNING"
+            )
+            self._delay = 60
         self._dir = os.environ.get("CFG_DIRECTORY", "/config")
         self._flows = {}
         self._exec_mode = cfg('execution', default='parallel')
