@@ -23,8 +23,8 @@ class FlowManager(WorkerBase):
         if os.path.exists(self._dir):
             self.start()
 
-    def run(self) -> None:
-        """Run the flow manager."""
+    def _get_flow_files(self) -> list:
+        """Get the list of flow files."""
         files = []
         for filename in os.listdir(self._dir):
             file_path = os.path.join(self._dir, filename)
@@ -34,12 +34,11 @@ class FlowManager(WorkerBase):
                 files.append(file_path)
             else:
                 log(f"Skipping non-YAML file: {filename}")
+        return files
 
-        if not files:
-            log("No flow files found to run.", level="INFO")
-            return
-
-        # add new flows
+    def _manage_flows(self, files: list) -> None:
+        """Add new flows and remove old ones."""
+        # Add new flows
         for file in files:
             if file not in self._flows:
                 flow = Flow(file)
@@ -47,17 +46,19 @@ class FlowManager(WorkerBase):
                 if self._exec_mode == 'parallel':
                     flow.start()
 
-        # remove deleted flows
-        keys_to_remove = []
-        for key, flow in self._flows.items():
-            if key not in files:
-                log(f"Flow '{flow.name}' removed from the system.", level="INFO")
-                flow.stop()
-                keys_to_remove.append(key)
-        for key in keys_to_remove:
-            flow = self._flows.pop(key)
-            del flow
+        # Remove deleted flows
+        for key in [key for key, flow in self._flows.items() if key not in files]:
+            log(f"Flow '{self._flows[key].name}' removed from the system.", level="INFO")
+            self._flows[key].stop()
+            del self._flows[key]
 
+    def run(self) -> None:
+        """Run the flow manager."""
+        files = self._get_flow_files()
+        if not files:
+            log("No flow files found to run.", level="INFO")
+            return
+        self._manage_flows(files)
         if self._exec_mode == 'sequential':
             log("Sequential flow execution started.", level="INFO")
             sorted_flows = sorted(self._flows.values(), key=lambda f: f.priority)

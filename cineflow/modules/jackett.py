@@ -78,14 +78,14 @@ class Jackett(ConsumerBase):
             results = [r for r in results if r['resolution'] == resolution]
         return self._remove_duplicates(results)
 
-    def _parse_query(self, query: Any) -> List[str, int, str, bool]:
-        if not query or query == '':
+    def _parse_query(self, q: Any) -> List[str, int, str, bool]:
+        if not q or q == '':
             return '', 0, None, False
-        if isinstance(query, str):
-            return query, 0, None, False
-        if isinstance(query, dict):
-            return query.get('include', ''), query.get('seeders', 0), query.get('resolution', 0),  query.get('exclude', False)
-        log(f"Invalid query type: {type(query)}. Query must be a string or a dictionary. Skipp option!")
+        if isinstance(q, str):
+            return q, 0, None, False
+        if isinstance(q, dict):
+            return q.get('include', ''), q.get('seeders', 0), q.get('resolution', 0),  q.get('exclude', False)
+        log(f"Invalid query type: {type(q)}. Query must be a string or a dictionary. Skipp option!")
         return '', 0, None, False
 
     def _remove_duplicates(self, results: list):
