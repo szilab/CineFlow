@@ -4,7 +4,7 @@ import os
 from typing import Any
 import inspect
 import yaml
-from system.config import cfg
+from cineflow.system.config import cfg
 from cineflow.bases.module import ModuleBase
 from cineflow.bases.worker import WorkerBase
 from cineflow.system.logger import log
@@ -72,7 +72,7 @@ class FlowManager(WorkerBase):
             flow.stop()
 
 
-class Flow(WorkerBase):  # pylint: disable=too-few-public-methods
+class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Class to manage the execution of a flow."""
 
     def __init__(self, file: str) -> None:

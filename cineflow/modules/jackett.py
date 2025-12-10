@@ -1,9 +1,9 @@
 """Jackett API consumer module."""
 
 from typing import List, Any
-from cineflow.bases.module import ConsumerBase
+from cineflow.system.logger import log
 from cineflow.system.misc import sort_data, sanitize_name, media_title, media_year, media_resolution
-from system.logger import log
+from cineflow.bases.module import ConsumerBase
 
 
 class Jackett(ConsumerBase):

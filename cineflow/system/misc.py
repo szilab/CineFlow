@@ -28,31 +28,37 @@ def __title_groups(title: str) -> None:
 
 
 def media_title(title: str):
+    """Extract media title from a given string."""
     if group := __title_groups(title):
         return group[0].replace('.', ' ').strip()
     return None
 
 
 def media_year(title: str):
+    """Extract media year from a given string."""
     if group := __title_groups(title):
         return group[1]
     return None
 
 
 def media_resolution(title: str):
+    """Extract media resolution from a given string."""
+    ret = None
+    if '360p' in title.lower():
+        ret = '360p'
     if '480p' in title.lower():
-        return '480p'
+        ret = '480p'
     if '720p' in title.lower():
-        return '720p'
+        ret = '720p'
     if '1080p' in title.lower():
-        return '1080p'
+        ret = '1080p'
     if '1440p' in title.lower():
-        return '1440p'
+        ret = '1440p'
     if '2160p' in title.lower():
-        return '2160p'
+        ret = '2160p'
     if '4320p' in title.lower():
-        return '4320p'
-    return None
+        ret = '4320p'
+    return ret
 
 
 def evaluate(left: str, right: str, expression: str, wcase: bool = True) -> bool:
