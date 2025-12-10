@@ -51,6 +51,8 @@ class ImageHandler():
                 self._img = self._apply_border(color=color)
             elif mod == 'triangle':
                 self._apply_triangle(color=color, position=position)
+            elif mod == 'none':
+                pass
             else:
                 log(f"Unknown image modification '{mod}'", level='WARNING')
         except (Exception) as e:  # pylint: disable=broad-except
@@ -58,6 +60,7 @@ class ImageHandler():
         log(f"Image modification '{mod}' applied successfully")
 
     def apply_from_rule(self, rule: dict) -> None:
+        """Apply modifications based on a rule dictionary."""
         self.apply(
             mod=rule.get('modification'),
             color=rule.get('color', 'red'),

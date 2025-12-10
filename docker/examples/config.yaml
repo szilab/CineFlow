@@ -8,7 +8,7 @@ library:
     modification: grayscale
     property: link
   - expression: exists
-    modification: border
+    modification: none # border
     property: link
     color: yellow
   - case_sensitive: false

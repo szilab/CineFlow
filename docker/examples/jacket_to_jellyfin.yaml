@@ -8,7 +8,7 @@ steps:
     input:
       query:
         include: 'HUN'
-        seeders: 20
+        seeders: 50
         resolution: '1080p'
   - name: Extend with TMDB data
     module: tmdb
