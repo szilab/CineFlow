@@ -1,0 +1,30 @@
+name: Jackett to Jellyfin
+delay: 60
+priority: 2
+steps:
+  - name: Collect from Jackett
+    module: jackett
+    action: get
+    input:
+      query:
+        include: 'HUN'
+        seeders: 50
+        resolution: '1080p'
+  - name: Extend with TMDB data
+    module: tmdb
+    action: enrich
+    input: previous
+    config:
+      must_match: true
+  - name: Filter out Jellyfin existing
+    module: jellyfin
+    action: unique
+    input:
+      query:
+        parentLibrary: Trending
+        isInverse: true
+      data: previous
+  - name: Export to library
+    module: library
+    action: put
+    input: previous

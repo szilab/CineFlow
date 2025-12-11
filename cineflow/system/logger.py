@@ -39,7 +39,7 @@ class Logger():
         return cls.instance
 
     def __init__(self):
-        self._level = LogLevels[os.environ.get('LOG_LEVEL', 'INFO')]
+        self._level = LogLevels[os.environ.get('LOG_LEVEL', 'MSG')]
         self._colors = bool(os.environ.get('LOG_COLORS', False))
         self._lock = threading.Lock()
 
@@ -55,7 +55,7 @@ class Logger():
             thread = thread.replace('MainThread', 'main')
             message = (
                 f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] " +
-                f" ({level} from {thread[:10]})".ljust(26) +
+                f" ({level[:4]} from {thread[:10]})".ljust(26) +
                 message
             )
             if self._colors:

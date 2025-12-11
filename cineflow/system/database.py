@@ -19,7 +19,10 @@ class Database(WorkerBase, metaclass=SingletonMeta):
     def __init__(self):
         super().__init__()
         self.delay = 240
-        self._file = os.path.join(tempfile.gettempdir(), "cachedb.sqlite3")
+        self._file = os.path.join(
+            os.environ.get("DB_DIRECTORY", tempfile.gettempdir()),
+            "cachedb.sqlite3"
+        )
         self._lock = threading.Lock()
         self._conn = None
         self._cursor = None

@@ -44,10 +44,7 @@ class ModuleBase():
         if not self._empty_property_allowed:
             for key, value in data.items():
                 if value is None:
-                    log(
-                        f"Empty property '{key}' not allowed in {self.name} module.",
-                        level='WARNING'
-                    )
+                    log(f"Empty property '{key}' not allowed in {self.name} module.")
                     return {}
         return data
 
@@ -153,7 +150,7 @@ class ConsumerBase(ModuleBase, ABC):
             else:
                 if not self.cfg('must_match', default=False):
                     to_return.append(item)
-                log(f"No media found for '{item.get('title')}' ({item.get('year')})", level='WARNING')
+                log(f"No media found for '{item.get('title')}' ({item.get('year')})", level='MSG')
         return to_return
 
     def unique(self, data: list[dict], query: Any = None) -> List[Dict]:

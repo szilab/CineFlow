@@ -118,9 +118,7 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
                 outp = self._call_action(action=action, inp=inp)
             except (ValueError, TypeError) as exc:
                 log(f"Stop flow, error calling action '{step.get('name')}' -> {exc}", level="ERROR")
-                # log (f"Parameters: {inp}")
                 return
-            # # if outp:
             if step.get("name"):
                 self._outputs[step.get("name")] = outp
             self._outputs['latest'] = outp

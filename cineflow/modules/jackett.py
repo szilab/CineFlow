@@ -38,6 +38,9 @@ class Jackett(ConsumerBase):
             'year': media_year,
             'resolution': media_resolution,
         }
+        self.params = {
+            'apikey': self.cfg('token'),
+        }
 
     def get(self, query: Any = None):
         """Collect torrents from Jackett."""
@@ -59,7 +62,6 @@ class Jackett(ConsumerBase):
         response = self._handler.get(
             endpoint="/api/v2.0/indexers/all/results",
             params={
-                'apikey': self.cfg('token'),
                 'Query': query,
                 'Category[]': self._category,
             }
@@ -78,7 +80,7 @@ class Jackett(ConsumerBase):
             results = [r for r in results if r['resolution'] == resolution]
         return self._remove_duplicates(results)
 
-    def _parse_query(self, q: Any) -> List[str, int, str, bool]:
+    def _parse_query(self, q: Any) -> tuple[str, int, str, bool]:
         if not q or q == '':
             return '', 0, None, False
         if isinstance(q, str):

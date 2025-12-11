@@ -13,6 +13,7 @@ INSTALL_REQUIRES = [
     'pyyaml>=6.0',
     'requests>=2.32.3',
     'pillow>=11.2.1',
+    'setuptools>=80.9.0',
 ]
 
 
@@ -28,6 +29,7 @@ def read_version():
 
 
 def readme():
+    """Read the README.md file for the long description."""
     try:
         with open('README.md', "r", encoding="utf8") as f:
             return f.read()
