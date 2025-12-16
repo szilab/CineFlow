@@ -150,7 +150,7 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
             return None
         return action
 
-    def _load_input(self, step: dict) -> dict:
+    def _load_input(self, step: dict) -> Any:
         """Load input data for the action."""
         inp = step.get("input")
         if not inp or inp == "none":
@@ -158,26 +158,40 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         if inp == "previous":
             return self._outputs.get('latest')
         if isinstance(inp, list):
-            merged = []
-            for s in inp:
-                if str(s).strip("{}") in self._outputs:
-                    merged.extend(self._outputs[str(s).strip("{}")])
-                else:
-                    log(f"Output '{str(s).strip('{}')}' not found, passing raw input.", level="WARNING")
-            return merged
+            return self._handle_list_input(inp)
         if isinstance(inp, str):
-            if str(inp).startswith("{{") and str(inp).endswith("}}"):
-                if str(inp).strip("{}") in self._outputs:
-                    return self._outputs[str(inp).strip("{}")]
-                else:
-                    log(f"Output '{str(inp).strip('{}')}' not found, passing raw input.", level="WARNING")
-                    return inp
+            return self._handle_string_input(inp)
         if isinstance(inp, dict):
-            if inp.get("data") and inp.get("data") == "previous":
-                inp["data"] = self._outputs.get('latest')
+            return self._handle_dict_input(inp)
         return inp
 
-    def _call_action(self, action: callable, inp: dict) -> Any:
+    def _handle_list_input(self, inp: list) -> list:
+        """Handle list input by merging outputs from previous steps."""
+        merged = []
+        for s in inp:
+            output_key = str(s).strip("{}")
+            if output_key in self._outputs:
+                merged.extend(self._outputs[output_key])
+            else:
+                log(f"Output '{output_key}' not found in outputs.", level="WARNING")
+        return merged
+
+    def _handle_string_input(self, inp: str) -> Any:
+        """Handle string input, resolving references to previous step outputs."""
+        if inp.startswith("{{") and inp.endswith("}}"):
+            output_key = inp.strip("{}")
+            if output_key in self._outputs:
+                return self._outputs[output_key]
+            log(f"Output '{output_key}' not found, passing raw input.", level="WARNING")
+        return inp
+
+    def _handle_dict_input(self, inp: dict) -> dict:
+        """Handle dictionary input, resolving 'previous' data reference."""
+        if inp.get("data") == "previous":
+            inp["data"] = self._outputs.get('latest')
+        return inp
+
+    def _call_action(self, action: callable, inp: Any) -> Any:
         """Call the action with the provided input data."""
         params = inspect.signature(action).parameters
         if len(params) == 0:

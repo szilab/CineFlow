@@ -33,8 +33,11 @@ class Tools():
 
         name_years = []
         for item in filtered:
-            if item.get('title') and item.get('year') \
-                and f"{item['title']} ({item['year']})" in name_years:
+            if (
+                item.get('title') and
+                item.get('year') and
+                f"{item['title']} ({item['year']})" in name_years
+            ):
                 log(f"Item '{item.get('title')}' ({item.get('year')}) is a duplicate.")
                 filtered.remove(item)
             else:

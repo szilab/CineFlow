@@ -49,7 +49,9 @@ class Jackett(ConsumerBase):
         results = self._get_results(query=query)
         return results[:self._limit] if results else []
 
-    def search(self, title: str, year: int, alttitle: str = None, tmdbid: str = None) -> List[dict]:  # pylint: disable=arguments-differ
+    def search(
+        self, title: str, year: int, alttitle: str = None, tmdbid: str = None
+    ) -> List[dict]:  # pylint: disable=arguments-differ
         """Search torrents for the given title."""
         query_pref = list(self.cfg('search_preference', default=[]))
         query_pref.append('')

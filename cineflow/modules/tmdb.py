@@ -82,14 +82,14 @@ class Tmdb(ConsumerBase):
         else:
             response = self._handler.get(
                 endpoint=f"/search/{self.kind}",
-                params={'query': title}  #, 'year': year}
+                params={'query': title}
             )
             if response.data and response.data.get('results'):
                 collected = response.data.get('results')
             if alttitle:
                 response = self._handler.get(
                     endpoint=f"/search/{self.kind}",
-                    params={'query': alttitle}  #, 'year': year}
+                    params={'query': alttitle}
                 )
                 if response.data and response.data.get('results'):
                     collected.extend(response.data.get('results'))
