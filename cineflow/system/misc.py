@@ -6,7 +6,7 @@ from pathlib import Path
 
 def sanitize_name(name: str, replace_with: str = "") -> str:
     """Sanitize a name by removing invalid characters."""
-    return re.sub(r'[\.\\\/:\*\?"<>\|\'\-]', replace_with, str(name))
+    return re.sub(r'[\.\\\/:\*\?\!"<>\|\'\-]', replace_with, str(name))
 
 
 def sanitize_path(name: str, replace_with: str = "") -> str:
@@ -59,6 +59,18 @@ def media_resolution(title: str):
     if '4320p' in title.lower():
         ret = '4320p'
     return ret
+
+
+def fix_imdbid(id_str: str):
+    """Fix the IMDB ID."""
+    if isinstance(id_str, dict) and id_str.get('Imdb'):
+        id_str = id_str.get('Imdb')
+    id_str = str(id_str).strip()
+    if not id_str or len(id_str) < 3:
+        return None
+    if id_str.startswith('tt'):
+        return id_str.lower()
+    return f"tt{str(id_str)}"
 
 
 def evaluate(left: str, right: str, expression: str, wcase: bool = True) -> bool:

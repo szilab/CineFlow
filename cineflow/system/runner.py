@@ -108,17 +108,17 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         for step in self.steps:
             log(f"Start step '{step.get('name')}'", level="MSG")
             outp = None
-            try:
-                if not (inst := self._load_module(step=step)):
-                    return
-                if not (action := self._load_action(inst=inst, step=step)):
-                    return
-                if not (inp := self._load_input(step=step)):
-                    log(f"No input data for step '{step.get('name')}'.")
-                outp = self._call_action(action=action, inp=inp)
-            except (ValueError, TypeError) as exc:
-                log(f"Stop flow, error calling action '{step.get('name')}' -> {exc}", level="ERROR")
+            # try:
+            if not (inst := self._load_module(step=step)):
                 return
+            if not (action := self._load_action(inst=inst, step=step)):
+                return
+            if not (inp := self._load_input(step=step)):
+                log(f"No input data for step '{step.get('name')}'.")
+            outp = self._call_action(action=action, inp=inp)
+            # except (ValueError, TypeError) as exc:
+            #     log(f"Stop flow, error calling action '{step.get('name')}' -> {exc}", level="ERROR")
+            #     return
             if step.get("name"):
                 self._outputs[step.get("name")] = outp
             self._outputs['latest'] = outp
@@ -157,10 +157,21 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
             return None
         if inp == "previous":
             return self._outputs.get('latest')
+        if isinstance(inp, list):
+            merged = []
+            for s in inp:
+                if str(s).strip("{}") in self._outputs:
+                    merged.extend(self._outputs[str(s).strip("{}")])
+                else:
+                    log(f"Output '{str(s).strip('{}')}' not found, passing raw input.", level="WARNING")
+            return merged
         if isinstance(inp, str):
             if str(inp).startswith("{{") and str(inp).endswith("}}"):
                 if str(inp).strip("{}") in self._outputs:
                     return self._outputs[str(inp).strip("{}")]
+                else:
+                    log(f"Output '{str(inp).strip('{}')}' not found, passing raw input.", level="WARNING")
+                    return inp
         if isinstance(inp, dict):
             if inp.get("data") and inp.get("data") == "previous":
                 inp["data"] = self._outputs.get('latest')

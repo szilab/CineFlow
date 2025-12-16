@@ -2,7 +2,7 @@
 
 from typing import List, Any
 from cineflow.system.logger import log
-from cineflow.system.misc import sort_data, sanitize_name, media_title, media_year, media_resolution
+from cineflow.system.misc import sort_data, fix_imdbid, sanitize_name, media_title, media_year, media_resolution
 from cineflow.bases.module import ConsumerBase
 
 
@@ -31,12 +31,14 @@ class Jackett(ConsumerBase):
             'size': ['Size'],
             'torrent': ['Title'],
             'seeders': ['Seeders'],
-            'resolution': ['Title'],
+            'resolution': ['Title', 'CategoryDesc'],
+            'imdbid': ['Imdb'],
         }
         self._data_transforms = {
             'title': media_title,
             'year': media_year,
             'resolution': media_resolution,
+            'imdbid': fix_imdbid,
         }
         self.params = {
             'apikey': self.cfg('token'),
@@ -47,10 +49,29 @@ class Jackett(ConsumerBase):
         results = self._get_results(query=query)
         return results[:self._limit] if results else []
 
-    def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:  # pylint: disable=arguments-differ
+    def search(self, title: str, year: int, alttitle: str = None, tmdbid: str = None) -> List[dict]:  # pylint: disable=arguments-differ
         """Search torrents for the given title."""
-        results = self._get_results(query=f"{sanitize_name(name=title)} {year}")
-        return self.match(results=results, title=title, year=year)
+        query_pref = list(self.cfg('search_preference', default=[]))
+        query_pref.append('')
+        for q in query_pref:
+            if match := self._sorted_match(title=title, year=year, alttitle=alttitle, query=q):
+                return match
+        return None
+
+    def _sorted_match(self, title: str, year: int, alttitle: str = None, query: str = ''):
+        results = self._search_w_query(title=title, year=year, query=query)
+        if alttitle:
+            r = self._search_w_query(title=alttitle, year=year, query=query)
+            if r:
+                results.extend(r)
+        results = sort_data(results, param="seeders", reverse=True)
+        return self.match(results=results, title=title, year=year, alttitle=alttitle)
+
+    def _search_w_query(self, title: str, year: str, query: str = ''):
+        title = sanitize_name(name=title)
+        if len(title) < 2:
+            title = f"{title} {year}"
+        return self._get_results(query=f"{title} {query}".strip())
 
     def _get_results(self, query: Any = None) -> List[dict]:
         query, seed, resolution, exclude = self._parse_query(query)

@@ -3,6 +3,7 @@
 from typing import List, Any
 from cineflow.system.logger import log
 from cineflow.bases.module import ConsumerBase
+from cineflow.system.misc import fix_imdbid
 
 
 class Jellyfin(ConsumerBase):
@@ -28,10 +29,12 @@ class Jellyfin(ConsumerBase):
             'year': ['ProductionYear', 'PremiereDate'],
             'jellyfinid': ['Id'],
             'tmdbid': ['ProviderIds'],
+            'imdbid': ['ProviderIds'],
         }
         self.transforms = {
             "year": lambda x: str(x)[0:4],
-            "tmdbid": lambda x: dict(x).get('Tmdb')
+            "tmdbid": lambda x: dict(x).get('Tmdb'),
+            "imdbid": fix_imdbid
         }
         self.params = {
             "ApiKey": self.cfg("token")
@@ -49,10 +52,10 @@ class Jellyfin(ConsumerBase):
             results = self._get_items(query=query)
         return list({item['jellyfinid']: item for item in results}.values())
 
-    def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:  # pylint: disable=arguments-differ
+    def search(self, title: str, year: int, alttitle: str = None, tmdbid: str = None) -> List[dict]:  # pylint: disable=arguments-differ
         """Search media for the given title."""
         results = self._get_items()
-        return self.match(results=results, title=title, year=year)
+        return self.match(results=results, title=title, year=year, alttitle=alttitle)
 
     def _parse_query(self, query: Any) -> dict:
         if not query:

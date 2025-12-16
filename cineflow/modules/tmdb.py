@@ -30,10 +30,12 @@ class Tmdb(ConsumerBase):
             'kind': ['media_type'],
             'tmdbid': ['id'],
             'poster': ['poster_path'],
+            'imdbid': ['imdb_id', 'id'],
         }
         self.transforms = {
             "year": lambda x: str(x)[0:4],
             "poster": lambda x: f"https://image.tmdb.org/t/p/original{x}",
+            "imdbid": self._get_imdbid,
         }
         self.params = {
             'api_key': self.cfg('token'),
@@ -48,7 +50,7 @@ class Tmdb(ConsumerBase):
         while len(collected) < self.limit or page > 20:
             response = self._handler.get(
                 endpoint=f"/trending/{self.kind}/week",
-                params={'page': page, }
+                params={'page': page, 'append_to_response': 'external_ids'}
             )
             if not response.data or not isinstance(response.data, dict):
                 break
@@ -64,27 +66,47 @@ class Tmdb(ConsumerBase):
         log(f"Collected {len(collected)} items from TMDB.")
         return collected
 
-    def search(self, title: str, year: int, tmdbid: str = None) -> dict:
+    def search(self, title: str, year: int, alttitle: str = None, tmdbid: str = None) -> dict:
         """Search for media in TMDB."""
+        collected = []
+        results = []
         if tmdbid:
             response = self._handler.get(
                 endpoint=f"/{self.kind}/{tmdbid}",
-                params={'append_to_response': 'images'}
+                params={'append_to_response': 'images,external_ids'}
             )
+            if response.data and response.data.get('results'):
+                collected = response.data.get('results')
+            if response.data and response.data.get('id'):
+                collected.append(response.data)
         else:
             response = self._handler.get(
                 endpoint=f"/search/{self.kind}",
-                params={'query': title, 'year': year}
+                params={'query': title}  #, 'year': year}
             )
-        if not response.data or not isinstance(response.data, dict):
-            return None
-        results = []
-        resp_data = []
-        if response.data.get('results'):
-            resp_data = response.data.get('results')
-        elif response.data.get('id'):
-            resp_data = [response.data]
-        for item in resp_data:
+            if response.data and response.data.get('results'):
+                collected = response.data.get('results')
+            if alttitle:
+                response = self._handler.get(
+                    endpoint=f"/search/{self.kind}",
+                    params={'query': alttitle}  #, 'year': year}
+                )
+                if response.data and response.data.get('results'):
+                    collected.extend(response.data.get('results'))
+        for item in collected:
             if media := self.map(item=item):
                 results.append(media)
-        return self.match(results=results, title=title, year=year)
+        return self.match(results=results, title=title, year=year, alttitle=alttitle)
+
+    def _get_imdbid(self, id_str: str = None) -> str:
+        id_str = str(id_str).strip()
+        if not id_str:
+            return None
+        if id_str.startswith('tt'):
+            return id_str.lower()
+        response = self._handler.get(
+            endpoint=f"/{self.kind}/{id_str}",
+        )
+        if response.data and response.data.get('imdb_id'):
+            return str(response.data.get('imdb_id')).lower()
+        return None

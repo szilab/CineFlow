@@ -114,13 +114,16 @@ class ConsumerBase(ModuleBase, ABC):
         """Search media for the given query."""
 
     @abstractmethod
-    def search(self, title: str, year: int, tmdbid: str = None) -> List[dict]:
+    def search(self, title: str, year: int, alttitle: str = None, tmdbid: str = None) -> List[dict]:
         """Search media for the given title and year."""
 
     def match(
-        self, results: List[Dict], title: str, year: int
+        self, results: List[Dict], title: str, year: int, alttitle: str = None
     ) -> dict:
         """Match item from the results by title and year."""
+        title = sanitize_name(name=title).lower()
+        if alttitle:
+            alttitle = sanitize_name(name=alttitle).lower()
         if (
             self.cfg('quick_match') and
             len(results) == 1 and
@@ -128,11 +131,19 @@ class ConsumerBase(ModuleBase, ABC):
         ):
             return results[0]
         for item in results or []:
-            if (
-                str(item.get('year')) == str(year) and
-                sanitize_name(name=item.get('title')).lower() == sanitize_name(name=title).lower()
-            ):
-                return item
+            if str(item.get('year')) == str(year):
+                i_title = sanitize_name(name=item.get('title')).lower()
+                i_alttitle = item.get('alttitle')
+                if i_alttitle:
+                    i_alttitle = sanitize_name(name=i_alttitle).lower()
+                if i_title == title:
+                    return item
+                if alttitle and i_title == alttitle:
+                    return item
+                if i_alttitle and i_alttitle == title:
+                    return item
+                if alttitle and i_alttitle and i_alttitle == alttitle:
+                    return item
         return None
 
     def enrich(self, data: list[dict]) -> List[Dict]:
@@ -142,6 +153,7 @@ class ConsumerBase(ModuleBase, ABC):
             if local_match := self.search(
                 title=item.get('title'),
                 year=item.get('year'),
+                alttitle=item.get('alttitle'),
                 tmdbid=item.get('tmdbid')
             ):
                 self._update(original=item, updates=local_match)
@@ -173,15 +185,19 @@ class ConsumerBase(ModuleBase, ABC):
         for d in data:
             match = False
             for r in results:
+                if d.get('imdbid') and r.get('imdbid') and str(d.get('imdbid')) == str(r.get('imdbid')):
+                    match = True
+                    log(f"Item '{d.get('title')}' ({d.get('year')}) [{d.get('imdbid')}] is match on {operation}.")
+                    break
                 if d.get('tmdbid') and r.get('tmdbid') and str(d.get('tmdbid')) == str(r.get('tmdbid')):
                     match = True
+                    log(f"Item '{d.get('title')}' ({d.get('year')}) [{d.get('tmdbid')}] is match on {operation}.")
                     break
                 if d.get('title') == r.get('title') and d.get('year') == r.get('year'):
                     match = True
+                    log(f"Item '{d.get('title')}' ({d.get('year')}) is match on {operation}.")
                     break
-            # match = any(d.get('title') == r.get('title') and d.get('year') == r.get('year') for r in results)
             if (operation == 'common' and match) or (operation == 'unique' and not match):
-                log(f"Item '{d.get('title')}' ({d.get('year')}) is {operation}, adding to the result.")
                 to_return.append(d)
         log(f"Returning {len(to_return)} items after {operation} operation.")
         return to_return
