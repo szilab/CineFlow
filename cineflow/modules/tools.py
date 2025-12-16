@@ -4,7 +4,7 @@ from typing import List, Dict
 from cineflow.system.logger import log
 
 
-class Tools():
+class Tools():  # pylint: disable=too-few-public-methods
     """Tools module class"""
 
     def __init__(self, config: dict = None) -> None:
