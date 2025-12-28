@@ -4,6 +4,7 @@ import os
 import shutil
 import time
 import re
+import json
 from threading import Lock
 from pathlib import Path
 from cineflow.system.image import ImageHandler
@@ -67,6 +68,36 @@ class DirectoryHandler(WorkerBase):
                 log(f"Failed to create: {e}", level='WARNING')
         return False
 
+    def export(self, item: str, media: dict) -> bool:
+        """Export data to directory."""
+        item = sanitize_path(item)
+        with self._lock:
+            try:
+                if not Path.exists(self._path / item):
+                    log(f"Failed to export data: {item} missing", level='WARNING')
+                with open(self._path / item / 'data.json', 'w') as f:
+                    json.dump(media, f, indent=4)
+                log(f"Data for item '{item}' exported successfully.")
+                return True
+            except (OSError, ValueError) as e:
+                log(f"Failed to export data: {e}", level='WARNING')
+        return False
+
+    def imprt(self, item: str) -> dict:
+        """Import data from directory."""
+        item = sanitize_path(item)
+        with self._lock:
+            try:
+                if not Path.exists(self._path / item):
+                    log(f"Failed to import data: {item} missing", level='WARNING')
+                with open(self._path / item / 'data.json', 'r') as f:
+                    media = json.load(f)
+                log(f"Data for item '{item}' imported successfully.")
+                return media
+            except (OSError, ValueError) as e:
+                log(f"Failed to import data: {e}", level='WARNING')
+        return {}
+
     def remove(self, item: str) -> bool:
         """Remove an item."""
         item = str(item)
@@ -76,10 +107,10 @@ class DirectoryHandler(WorkerBase):
         with self._lock:
             try:
                 shutil.rmtree(os.path.join(self._path, item))
-                log(f"Item '{item}' removed successfully.")
+                log(f"Item '{item}' removed successfully from library.", level='MSG')
                 return True
             except OSError as e:
-                log(f"Failed to removing: {e}", level='WARNING')
+                log(f"Failed to removing: {e}")
         return False
 
     def run(self):

@@ -2,6 +2,7 @@
 
 from typing import List, Any
 from cineflow.system.logger import log
+from cineflow.system.misc import fix_imdbid
 from cineflow.bases.module import ConsumerBase
 
 
@@ -25,7 +26,7 @@ class Tmdb(ConsumerBase):
         self.cache_time = 10800
         self.mappings = {
             'title': ['title'],
-            'alttile': ['original_title'],
+            'alttitle': ['original_title'],
             'year': ['release_date', 'first_air_date'],
             'kind': ['media_type'],
             'tmdbid': ['id'],
@@ -66,47 +67,58 @@ class Tmdb(ConsumerBase):
         log(f"Collected {len(collected)} items from TMDB.")
         return collected
 
-    def search(self, title: str, year: int, alttitle: str = None, tmdbid: str = None) -> dict:
+    def search(self, media: dict) -> dict:
         """Search for media in TMDB."""
-        collected = []
-        results = []
+        if match := self._match_w_result(media=media, tmdbid=media.get('tmdbid')):
+            return match
+        if media.get('alttitle') != media.get('title'):
+            if match := self._match_w_result(media=media, titlekey='alttitle'):
+                return match
+        return None
+
+    def _match_w_result(self, media: str, titlekey: str = 'title', tmdbid: str = None):
         if tmdbid:
-            response = self._handler.get(
+            results = self._search_w_tmdbid(tmdbid=tmdbid)
+            if match :=self.match(results=results, media=media):
+                return match
+        results = self._search_w_title(media=media, titlekey=titlekey)
+        return self.match(results=results, media=media)
+
+    def _search_w_tmdbid(self, tmdbid: str) -> list[dict]:
+        """Search for media in TMDB."""
+        response = self._handler.get(
                 endpoint=f"/{self.kind}/{tmdbid}",
                 params={'append_to_response': 'images,external_ids'}
             )
-            if response.data and response.data.get('results'):
-                collected = response.data.get('results')
-            if response.data and response.data.get('id'):
-                collected.append(response.data)
-        else:
-            response = self._handler.get(
-                endpoint=f"/search/{self.kind}",
-                params={'query': title}
-            )
-            if response.data and response.data.get('results'):
-                collected = response.data.get('results')
-            if alttitle:
-                response = self._handler.get(
-                    endpoint=f"/search/{self.kind}",
-                    params={'query': alttitle}
-                )
-                if response.data and response.data.get('results'):
-                    collected.extend(response.data.get('results'))
-        for item in collected:
-            if media := self.map(item=item):
-                results.append(media)
-        return self.match(results=results, title=title, year=year, alttitle=alttitle)
+        if response.data and response.data.get('id'):
+            return self.map(item=response.data)
+        return None
 
-    def _get_imdbid(self, id_str: str = None) -> str:
-        id_str = str(id_str).strip()
-        if not id_str:
+    def _search_w_title(self, media: dict, titlekey: str) -> list[dict]:
+        """Search for media in TMDB."""
+        if not media.get(titlekey) or len(media.get(titlekey)) < 2:
             return None
-        if id_str.startswith('tt'):
-            return id_str.lower()
         response = self._handler.get(
-            endpoint=f"/{self.kind}/{id_str}",
+            endpoint=f"/search/{self.kind}",
+            params={'query': media.get(titlekey), 'append_to_response': 'images,external_ids'}
+        )
+        if response.data and response.data.get('results'):
+            results = []
+            for item in response.data.get('results'):
+                if media := self.map(item=item):
+                    results.append(media)
+            return results
+        return None
+
+    def _get_imdbid(self, tmdb_id: str = None) -> str:
+        tmdb_id = str(tmdb_id).strip()
+        if not tmdb_id:
+            return None
+        if tmdb_id.startswith('tt'):
+            return fix_imdbid(tmdb_id)
+        response = self._handler.get(
+            endpoint=f"/{self.kind}/{tmdb_id}",
         )
         if response.data and response.data.get('imdb_id'):
-            return str(response.data.get('imdb_id')).lower()
+            return fix_imdbid(response.data.get('imdb_id'))
         return None

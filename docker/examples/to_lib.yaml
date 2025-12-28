@@ -3,7 +3,6 @@ delay: 60
 priority: 1
 steps:
 
-  # data from Jackett
   - name: Collect from Jackett
     module: jackett
     action: get
@@ -19,7 +18,6 @@ steps:
     config:
       must_match: true
 
-  # data from TMDB
   - name: Collect from TMDB
     module: tmdb
     action: get
@@ -29,20 +27,30 @@ steps:
     input: previous
     config:
       must_match: true
+      search_preference: ["HUN", "HDR", "1080p", "2160p"]
+      size_limit_gb: 26
 
-  # merge and clean data
-  - name: Merge data
+  - name: Merge data Jackett and TMDb data
     module: tools
     action: remove_duplicates
     input: ["Extend with Jackett data","Extend with TMDB data"]
+
   - name: Filter out Jellyfin existing media
     module: jellyfin
     action: unique
     input:
+      data: previous
       query:
         parentLibrary: Trending
         isInverse: true
+
+  - name: Exclude items by ID
+    module: tmdb
+    action: exclude
+    input:
       data: previous
+      query:
+        imdb_ids: [295701]
 
   - name: Export to library
     module: library

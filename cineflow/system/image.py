@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from io import BytesIO
 import requests
 from PIL import Image, ImageOps, ImageDraw, UnidentifiedImageError
 from cineflow.system.logger import log
@@ -71,7 +72,7 @@ class ImageHandler():
         try:
             response = requests.get(url, stream=True, timeout=10)
             response.raise_for_status()
-            img = Image.open(response.raw)
+            img = Image.open(BytesIO(response.content))
             img = img.resize(self._scale)
             log(f"Image loaded successfully from '{url}'")
         except (requests.RequestException, UnidentifiedImageError, OSError) as e:

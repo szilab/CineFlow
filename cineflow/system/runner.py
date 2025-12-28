@@ -194,7 +194,7 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
     def _call_action(self, action: callable, inp: Any) -> Any:
         """Call the action with the provided input data."""
         params = inspect.signature(action).parameters
-        if len(params) == 0:
+        if len(params) == 0 or inp is None:
             return action()
         if len(params) == 1:
             if isinstance(inp, dict):

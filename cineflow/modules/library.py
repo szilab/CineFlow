@@ -27,15 +27,16 @@ class Library(LibraryBase):
         super().__init__(config=config, required=['directory'])
         self.mappings = {
             'directory': ['directory'],
-            'title': ['directory'],
-            'year': ['directory'],
-            'tmdbid': ['directory'],
         }
-        self.transforms = {
-            'title': lambda x: x.split(' (')[0].strip(),
-            'year': lambda x: x.split(' (')[1].split(')')[0],
-            'tmdbid': self._get_tmdbid,
-        }
+        #     'title': ['directory'],
+        #     'year': ['directory'],
+        #     'tmdbid': ['directory'],
+        # }
+        # self.transforms = {
+        #     'title': lambda x: x.split(' (')[0].strip(),
+        #     'year': lambda x: x.split(' (')[1].split(')')[0],
+        #     'tmdbid': self._get_tmdbid,
+        # }
 
     def get(self) -> List[Dict]:
         """Get the list of items in the library."""
@@ -45,7 +46,12 @@ class Library(LibraryBase):
             if '(' not in directory.name or ')' not in directory.name:
                 log(f"Item '{directory.name}' does not have a valid name format.", level='WARNING')
                 continue
-            results.append({'directory': directory.name})
+            media = self._handler.get(item=directory.name)
+            if not media or not media.get('title') or not media.get('year'):
+                log(f"Item '{directory.name}' not found in library.", level='WARNING')
+                results.append({'directory': directory.name})
+            else:
+                results.append(media)
         log(f"Items in library: '{len(results)}'")
         data = [self.map(item=item) for item in results]
         return data
@@ -58,6 +64,7 @@ class Library(LibraryBase):
                 image = self._create_poster(media=media)
                 if self._handler.make(item=item, image=image):
                     media['directory'] = item
+                    self._handler.export(item=item, media=media)
             else:
                 image = None
                 log(f"Item '{media['title']}' has no poster, skipped.", level='WARNING')
@@ -68,12 +75,17 @@ class Library(LibraryBase):
         for media in data or []:
             item = self._item_name(media=media)
             self._handler.remove(item=item)
+            try:
+                item = self._item_name(media=media, key='alttitle')
+                self._handler.remove(item=item)
+            except KeyError:
+                pass
 
-    def _item_name(self, media: dict) -> str:
+    def _item_name(self, media: dict, key: str = 'title') -> str:
         """Generate a library item name for the media."""
         if media.get('tmdbid'):
-            return media['title'] + " (" + str(media['year']) + f") [tmdbid-{media['tmdbid']}]"
-        return media['title'] + " (" + str(media['year']) + ")"
+            return media[key] + " (" + str(media['year']) + f") [tmdbid-{media['tmdbid']}]"
+        return media[key] + " (" + str(media['year']) + ")"
 
     def _get_tmdbid(self, directory: dict) -> str:
         """Extract TMDB ID from the directory name."""
@@ -89,7 +101,7 @@ class Library(LibraryBase):
             return None
         if not self.cfg('rules'):
             log("No modification rules to apply to the library images.")
-            return None
+            return img
         for rule in self.cfg('rules'):
             if not isinstance(rule, dict) or not rule.get('property'):
                 log(f"Invalid library modification: {rule}", level='WARNING')

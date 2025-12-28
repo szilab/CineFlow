@@ -1,19 +1,19 @@
-execution: sequential
+#execution: sequential
 tmdb:
   quick_match: true
 library:
   directory: film
   rules:
-  - expression: missing
-    modification: grayscale
-    property: link
-  - expression: exists
-    modification: none # border
-    property: link
-    color: yellow
-  - case_sensitive: false
-    expression: contains
-    modification: triangle
+  # - expression: missing
+  #   modification: grayscale
+  #   property: link
+  # - expression: exists
+  #   modification: none # border
+  #   property: link
+  #   color: yellow
+  - expression: contains
     property: torrent
     value: hun
-    color: yellow
+    case_sensitive: false
+    color: red
+    modification: border

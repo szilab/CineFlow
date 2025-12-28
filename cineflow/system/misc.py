@@ -6,6 +6,8 @@ from pathlib import Path
 
 def sanitize_name(name: str, replace_with: str = "") -> str:
     """Sanitize a name by removing invalid characters."""
+    if not name:
+        return ''
     return re.sub(r'[\.\\\/:\*\?\!"<>\|\'\-]', replace_with, str(name))
 
 
@@ -65,12 +67,16 @@ def fix_imdbid(id_str: str):
     """Fix the IMDB ID."""
     if isinstance(id_str, dict) and id_str.get('Imdb'):
         id_str = id_str.get('Imdb')
-    id_str = str(id_str).strip()
-    if not id_str or len(id_str) < 3:
-        return None
+    id_str = str(id_str).lower().strip()
     if id_str.startswith('tt'):
-        return id_str.lower()
-    return f"tt{str(id_str)}"
+        id_str = id_str.replace('tt', '')
+    if not id_str:
+        return None
+    try:
+        id_num = int(id_str)
+    except ValueError:
+        return None
+    return id_num
 
 
 def evaluate(left: str, right: str, expression: str, wcase: bool = True) -> bool:

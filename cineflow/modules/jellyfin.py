@@ -45,6 +45,7 @@ class Jellyfin(ConsumerBase):
     def get(self, query: Any = None) -> List[dict]:
         """Collect media from Jellyfin."""
         query = self._parse_query(query)
+
         if query.get("isInverse"):
             del query["isInverse"]
             results = self._inverse_items(query_items=self._get_items(query=query))
@@ -52,12 +53,10 @@ class Jellyfin(ConsumerBase):
             results = self._get_items(query=query)
         return list({item['jellyfinid']: item for item in results}.values())
 
-    def search(
-        self, title: str, year: int, alttitle: str = None, tmdbid: str = None
-    ) -> List[dict]:  # pylint: disable=arguments-differ
+    def search(self, media: dict) -> dict:
         """Search media for the given title."""
         results = self._get_items()
-        return self.match(results=results, title=title, year=year, alttitle=alttitle)
+        return self.match(results=results, media=media)
 
     def _parse_query(self, query: Any) -> dict:
         if not query:

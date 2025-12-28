@@ -39,6 +39,7 @@ class Jackett(ConsumerBase):
             'year': media_year,
             'resolution': media_resolution,
             'imdbid': fix_imdbid,
+            'size': lambda x: int(x) / (1024 * 1024 * 1024),
         }
         self.params = {
             'apikey': self.cfg('token'),
@@ -46,46 +47,68 @@ class Jackett(ConsumerBase):
 
     def get(self, query: Any = None):
         """Collect torrents from Jackett."""
-        results = self._get_results(query=query)
+        results = self._get_results(keywords='')
+        if query:
+            results = self._apply_query(results=results, query=query)
+        results = self._apply_search_pref(results)
+        results = self._apply_size_limit(results=results)
+        results = self._remove_duplicates(results)
         return results[:self._limit] if results else []
 
-    def search(
-        self, title: str, year: int, alttitle: str = None, tmdbid: str = None
-    ) -> List[dict]:  # pylint: disable=arguments-differ
+    def search(self, media: dict) -> dict:
         """Search torrents for the given title."""
-        query_pref = list(self.cfg('search_preference', default=[]))
-        query_pref.append('')
-        for q in query_pref:
-            if match := self._sorted_match(title=title, year=year, alttitle=alttitle, query=q):
+        if not media.get('title') or not media.get('year'):
+            log(f"Item missing required fields: {media}", level='DEBUG')
+            return None
+        if match := self._match_result(media=media):
+            return match
+        if media.get('alttitle') != media.get('title'):
+            if match := self._match_result(media=media, titlekey='alttitle'):
                 return match
         return None
 
-    def _sorted_match(self, title: str, year: int, alttitle: str = None, query: str = ''):
-        results = self._search_w_query(title=title, year=year, query=query)
-        if alttitle:
-            r = self._search_w_query(title=alttitle, year=year, query=query)
-            if r:
-                results.extend(r)
-        results = sort_data(results, param="seeders", reverse=True)
-        return self.match(results=results, title=title, year=year, alttitle=alttitle)
+    def _match_result(self, media: dict, titlekey: dict = 'title'):
+        results = self._search_w_title(media=media, titlekey=titlekey)
+        results = self._apply_search_pref(results)
+        return self.match(results=results, media=media)
 
-    def _search_w_query(self, title: str, year: str, query: str = ''):
-        title = sanitize_name(name=title)
-        if len(title) < 2:
-            title = f"{title} {year}"
-        return self._get_results(query=f"{title} {query}".strip())
+    def _search_w_title(self, media: dict, titlekey: str = 'title'):
+        title = sanitize_name(name=media.get(titlekey))
+        if not title or len(title) < 2 :
+            return None
+        if len(title) < 3:
+            title = f"{title} {media.get('year')}"
+        results = self._get_results(keywords=title)
+        results = self._apply_size_limit(results)
+        return results
 
-    def _get_results(self, query: Any = None) -> List[dict]:
-        query, seed, resolution, exclude = self._parse_query(query)
-        if exclude:
-            exclude = query
-            query = ''
+    def _apply_search_pref(self, results: list):
+        query_pref = list(self.cfg('search_preference', default=[]))
+        query_pref.append('')
+        scored_res = [{'s': None, 'r': r} for r in results]
+        for item in scored_res:
+            score = 0
+            for q in query_pref:
+                if str(q).lower() in str(item['r'].get('torrent', '')).lower():
+                    score += (len(query_pref) - query_pref.index(q))
+            item['s'] = score
+        scored_res = sorted(scored_res, key=lambda x: x['s'], reverse=True)
+        filtered = [r['r'] for r in scored_res]
+        return filtered
+
+    def _apply_size_limit(self, results: list):
+        limit = int(self.cfg('size_limit_gb', default=0))
+        if not limit:
+            return results
+        return [r for r in results if r['size'] <= limit]
+
+    def _get_results(self, keywords: str = None) -> List[dict]:
         if self.cfg('include'):
-            query += ' ' + self.cfg('include', default='')
+            keywords += ' ' + self.cfg('include', default='')
         response = self._handler.get(
             endpoint="/api/v2.0/indexers/all/results",
             params={
-                'Query': query,
+                'Query': keywords,
                 'Category[]': self._category,
             }
         )
@@ -95,29 +118,45 @@ class Jackett(ConsumerBase):
         for item in sort_data(response.data.get('Results', []), param="Seeders", reverse=True):
             if media := self.map(item=item):
                 results.append(media)
-        if exclude:
-            results = [r for r in results if all(e.lower() not in r['title'].lower() for e in exclude.split(' '))]
+        return results
+
+    def _parse_query(self, q: Any) -> tuple[str, int, str, bool]:
+        default = '', 0, None, False, 0
+        if not q or q == '':
+            return default
+        if isinstance(q, str):
+            return q, 0, None, False, 0
+        if isinstance(q, dict):
+            return \
+                q.get('include', ''), q.get('seeders', 0), \
+                q.get('resolution', 0),  q.get('exclude', False), \
+                (int(q.get('size', 0)) or 0),
+        log(f"Invalid query type: {type(q)}. Query must be a string or a dictionary. Skipp option!")
+        return default
+
+    def _apply_query(self, results: list, query: dict) -> list:
+        query, seed, resolution, exclude, size = self._parse_query(query)
         if seed:
             results = [r for r in results if r['seeders'] >= seed]
         if resolution:
             results = [r for r in results if r['resolution'] == resolution]
-        return self._remove_duplicates(results)
-
-    def _parse_query(self, q: Any) -> tuple[str, int, str, bool]:
-        if not q or q == '':
-            return '', 0, None, False
-        if isinstance(q, str):
-            return q, 0, None, False
-        if isinstance(q, dict):
-            return q.get('include', ''), q.get('seeders', 0), q.get('resolution', 0),  q.get('exclude', False)
-        log(f"Invalid query type: {type(q)}. Query must be a string or a dictionary. Skipp option!")
-        return '', 0, None, False
+        if size and size > 0:
+            results = [r for r in results if r['size'] <= size]
+        if exclude:
+            results = [r for r in results if all(e.lower() not in r['torrent'].lower() for e in query.split(' '))]
+        if query:
+            results = [r for r in results if all(q.lower() in r['torrent'].lower() for q in query.split(' '))]
+        return results
 
     def _remove_duplicates(self, results: list):
-        unique_titles = set()
-        unique_results = []
-        for result in results:
-            if result['title'] not in unique_titles:
-                unique_results.append(result)
-                unique_titles.add(result['title'])
-        return unique_results
+        filtered = []
+        seen_titles = set()
+        for item in results:
+            title_year = f"{item.get('title')} ({item.get('year')})"
+            if title_year not in seen_titles:
+                filtered.append(item)
+                seen_titles.add(title_year)
+            else:
+                log(f"Duplicate torrent found and removed: {item.get('torrent')}", level='DEBUG')
+        return filtered
+        

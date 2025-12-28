@@ -114,48 +114,54 @@ class ConsumerBase(ModuleBase, ABC):
         """Search media for the given query."""
 
     @abstractmethod
-    def search(self, title: str, year: int, alttitle: str = None, tmdbid: str = None) -> List[dict]:
+    def search(self, media: dict) -> dict:
         """Search media for the given title and year."""
 
-    def match(
-        self, results: List[Dict], title: str, year: int, alttitle: str = None
-    ) -> dict:
-        """Match item from the results by title and year."""
-        title = sanitize_name(name=title).lower()
-        if alttitle:
-            alttitle = sanitize_name(name=alttitle).lower()
-        if (
-            self.cfg('quick_match') and
-            len(results) == 1 and
-            results[0].get('year') == str(year)
-        ):
-            return results[0]
+    def match(self, results: List[Dict], media: dict) -> dict:
+        """Match item from the results"""
+        quck_match = self.cfg('quick_match', default=False) and results and len(results) == 1
         for item in results or []:
-            if str(item.get('year')) == str(year):
-                i_title = sanitize_name(name=item.get('title')).lower()
-                i_alttitle = item.get('alttitle')
-                if i_alttitle:
-                    i_alttitle = sanitize_name(name=i_alttitle).lower()
-                if i_title == title:
-                    return item
-                if alttitle and i_title == alttitle:
-                    return item
-                if i_alttitle and i_alttitle == title:
-                    return item
-                if alttitle and i_alttitle and i_alttitle == alttitle:
-                    return item
+            if self._match_w_id(item=item, media=media):
+                log(f"Item '{media.get('title')}' match found by TMDB ID")
+                return item
+            if self._match_w_id(item=item, media=media, idkey='imdbid'):
+                log(f"Item '{media.get('title')}' match found by IMDB ID")
+                return item
+            if self._match_w_title(item=item, media=media, quick_match=quck_match):
+                log(f"Item '{media.get('title')}' match found by title ID")
+                return item
+            if self._match_w_title(item=item, media=media, titlekey='alttitle', quick_match=quck_match):
+                log(f"Item '{media.get('title')}' match found by alternate title ID")
+                return item
         return None
+
+    def _match_w_id(self, item: dict, media: dict, idkey: str = 'tmdbid') -> bool:
+        """Match item from the results"""
+        if item.get(idkey) and media.get(idkey) and str(item.get(idkey)) == str(media.get(idkey)):
+            return True
+        return False
+
+    def _match_w_title(self, item: dict, media: dict, titlekey: str = 'tmdbid', quick_match: bool = False):
+        """Match item from the results"""
+        title = sanitize_name(name=media.get(titlekey)).lower()
+        it = sanitize_name(name=item.get('title')).lower()
+        ia = sanitize_name(name=item.get('alttitle')).lower()
+        iy = str(item.get('year'))
+        my = str(media.get('year'))
+        if not quick_match:
+            if iy != my:
+                return False
+        if it == title:
+            return True
+        if ia and ia == title:
+            return True
+        return False
 
     def enrich(self, data: list[dict]) -> List[Dict]:
         """Extend the received data with module properties"""
         to_return = []
         for item in data or []:
-            if local_match := self.search(
-                title=item.get('title'),
-                year=item.get('year'),
-                alttitle=item.get('alttitle'),
-                tmdbid=item.get('tmdbid')
-            ):
+            if local_match := self.search(media=item):
                 self._update(original=item, updates=local_match)
                 to_return.append(item)
                 log(f"Item '{item.get('title')}' ({item.get('year')}) extended.")
@@ -172,6 +178,16 @@ class ConsumerBase(ModuleBase, ABC):
     def common(self, data: list[dict], query: Any = None) -> List[Dict]:
         """Return items from the received data which ones are in the queried items"""
         return self._set_operations(data=data, query=query, operation='common')
+
+    def exclude(self, data: list[dict], query: Any = None) -> List[Dict]:
+        """Exclude items from the received data wich ones are in the query"""
+        if not isinstance(query, dict):
+            return data
+        if query.get('imdb_ids'):
+            data = [item for item in data if item.get('imdbid') not in query.get('imdb_ids')]
+        if query.get('tmdb_ids'):
+            data = [item for item in data if item.get('tmdbid') not in query.get('tmdb_ids')]
+        return data
 
     def _set_operations(self, data: list[dict], query: Any = None, operation: str = 'common') -> List[Dict]:
         if not data:
