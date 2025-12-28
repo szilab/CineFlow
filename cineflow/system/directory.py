@@ -75,7 +75,7 @@ class DirectoryHandler(WorkerBase):
             try:
                 if not Path.exists(self._path / item):
                     log(f"Failed to export data: {item} missing", level='WARNING')
-                with open(self._path / item / 'data.json', 'w') as f:
+                with open(self._path / item / 'data.json', 'w', encoding='utf-8') as f:
                     json.dump(media, f, indent=4)
                 log(f"Data for item '{item}' exported successfully.")
                 return True
@@ -90,7 +90,7 @@ class DirectoryHandler(WorkerBase):
             try:
                 if not Path.exists(self._path / item):
                     log(f"Failed to import data: {item} missing", level='WARNING')
-                with open(self._path / item / 'data.json', 'r') as f:
+                with open(self._path / item / 'data.json', 'r', encoding='utf-8') as f:
                     media = json.load(f)
                 log(f"Data for item '{item}' imported successfully.")
                 return media

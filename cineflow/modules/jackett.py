@@ -130,7 +130,7 @@ class Jackett(ConsumerBase):
             return \
                 q.get('include', ''), q.get('seeders', 0), \
                 q.get('resolution', 0),  q.get('exclude', False), \
-                (int(q.get('size', 0)) or 0),
+                (int(q.get('size', 0)) or 0)
         log(f"Invalid query type: {type(q)}. Query must be a string or a dictionary. Skipp option!")
         return default
 

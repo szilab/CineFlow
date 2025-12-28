@@ -46,7 +46,7 @@ class Library(LibraryBase):
             if '(' not in directory.name or ')' not in directory.name:
                 log(f"Item '{directory.name}' does not have a valid name format.", level='WARNING')
                 continue
-            media = self._handler.get(item=directory.name)
+            media = self._handler.imprt(item=directory.name)
             if not media or not media.get('title') or not media.get('year'):
                 log(f"Item '{directory.name}' not found in library.", level='WARNING')
                 results.append({'directory': directory.name})
