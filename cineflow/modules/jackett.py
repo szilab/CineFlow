@@ -74,7 +74,7 @@ class Jackett(ConsumerBase):
 
     def _search_w_title(self, media: dict, titlekey: str = 'title'):
         title = sanitize_name(name=media.get(titlekey))
-        if not title or len(title) < 2 :
+        if not title or len(title) < 2:
             return None
         if len(title) < 3:
             title = f"{title} {media.get('year')}"
@@ -159,4 +159,3 @@ class Jackett(ConsumerBase):
             else:
                 log(f"Duplicate torrent found and removed: {item.get('torrent')}", level='DEBUG')
         return filtered
-        
