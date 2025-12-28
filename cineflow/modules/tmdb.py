@@ -79,7 +79,7 @@ class Tmdb(ConsumerBase):
     def _match_w_result(self, media: str, titlekey: str = 'title', tmdbid: str = None):
         if tmdbid:
             results = self._search_w_tmdbid(tmdbid=tmdbid)
-            if match :=self.match(results=results, media=media):
+            if match := self.match(results=results, media=media):
                 return match
         results = self._search_w_title(media=media, titlekey=titlekey)
         return self.match(results=results, media=media)
