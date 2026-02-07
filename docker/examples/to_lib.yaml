@@ -9,7 +9,7 @@ steps:
     input:
       query:
         include: 'HUN'
-        seeders: 50
+        seeders: 40
         resolution: '1080p'
   - name: Extend with TMDB data
     module: tmdb
@@ -27,22 +27,21 @@ steps:
     input: previous
     config:
       must_match: true
-      search_preference: ["HUN", "HDR", "1080p", "2160p"]
-      size_limit_gb: 26
 
   - name: Merge data Jackett and TMDb data
     module: tools
     action: remove_duplicates
     input: ["Extend with Jackett data","Extend with TMDB data"]
 
-  - name: Filter out Jellyfin existing media
-    module: jellyfin
-    action: unique
-    input:
-      data: previous
-      query:
-        parentLibrary: Trending
-        isInverse: true
+  # TODO: need to fix inverse logic
+  # - name: Filter out Jellyfin existing media
+  #   module: jellyfin
+  #   action: unique
+  #   input:
+  #     data: previous
+  #     query:
+  #       parentLibrary: Trending
+  #       isInverse: true
 
   - name: Exclude items by ID
     module: tmdb

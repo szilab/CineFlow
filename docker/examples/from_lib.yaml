@@ -3,34 +3,34 @@ delay: 5
 priority: 1
 steps:
 
-  # - name: Collect Jellyfin favorites
+  - name: Collect Jellyfin favorites
+    module: jellyfin
+    action: get
+    input:
+      query:
+        parentLibrary: Trending
+        isFavorite: true
+        allUsers: true
+  - name: Add Jackett data
+    module: jackett
+    action: enrich
+    input: previous
+    config:
+      must_match: true
+  - name: Add to Transmission
+    module: transmission
+    action: put
+    input: previous
+
+  # TODO: need to fix inverse logic
+  # - name: Collect Jellyfin existing media
   #   module: jellyfin
   #   action: get
   #   input:
   #     query:
   #       parentLibrary: Trending
-  #       isFavorite: true
-  #       allUsers: true
-  # - name: Add Jackett data
-  #   module: jackett
-  #   action: enrich
+  #       isInverse: true
+  # - name: Delete Jellyfin existing items from library
+  #   module: library
+  #   action: remove
   #   input: previous
-  #   config:
-  #     search_preference: ['HDR 1080p', '1080p', 'HDR 2160p', 2160p']
-  # - name: Add to Transmission
-  #   module: transmission
-  #   action: put
-  #   input: previous
-
-  - name: Collect Jellyfin existing media
-    module: jellyfin
-    action: get
-    input:
-      data: previous
-      query:
-        parentLibrary: Trending
-        isInverse: true
-  - name: Delete Jellyfin existing items from library
-    module: library
-    action: remove
-    input: previous

@@ -1,6 +1,9 @@
 #execution: sequential
 tmdb:
   quick_match: true
+jackett:
+  size_limit_gb: 26
+  search_preference: ["HUN", "HDR", "1080p", "2160p"]
 library:
   directory: film
   rules:

@@ -74,10 +74,12 @@ class Library(LibraryBase):
         """Remove the media from the library."""
         for media in data or []:
             item = self._item_name(media=media)
-            self._handler.remove(item=item)
+            if self._handler.exists(item=item):
+                self._handler.remove(item=item)
             try:
                 item = self._item_name(media=media, key='alttitle')
-                self._handler.remove(item=item)
+                if self._handler.exists(item=item):
+                    self._handler.remove(item=item)
             except KeyError:
                 pass
 

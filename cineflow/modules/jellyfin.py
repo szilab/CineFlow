@@ -51,7 +51,7 @@ class Jellyfin(ConsumerBase):
             results = self._inverse_items(query_items=self._get_items(query=query))
         else:
             results = self._get_items(query=query)
-        return list({item['jellyfinid']: item for item in results}.values())
+        return list({item['jellyfinid']: item for item in results if item.get('jellyfinid')}.values())
 
     def search(self, media: dict) -> dict:
         """Search media for the given title."""
@@ -111,11 +111,13 @@ class Jellyfin(ConsumerBase):
 
     def _inverse_items(self, query_items: List[dict]) -> List[dict]:
         all_items = self._get_items()
-        query_ids = {item['jellyfinid'] for item in query_items}
+        query_ids = {item['imdbid'] for item in query_items}
         not_in_query = []
         for item in all_items:
-            if item and item['jellyfinid'] not in query_ids:
+            if item and item['imdbid'] not in query_ids:
                 not_in_query.append(item)
+            else:
+                log("Item already in query, skipping.")
         return not_in_query
 
     def _get_users(self):

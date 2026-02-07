@@ -1,5 +1,7 @@
 """Transmission API consumer module."""
 
+import base64
+import requests
 from typing import List, Dict, Any
 from cineflow.bases.module import ConsumerBase
 from cineflow.system.logger import log
@@ -74,12 +76,35 @@ class Transmission(ConsumerBase):
             if not media.get('link'):
                 log(f"Item '{media.get('title')}' is missing torrent link.", level='WARNING')
                 continue
+
+            params = {}
+            if self.cfg('directory'):
+                params['download-dir'] = self.cfg('directory')
+
+            link = media['link']
+            if link.startswith('magnet:'):
+                params['filename'] = link
+            elif link.startswith(('http://', 'https://')):
+                try:
+                    req = requests.get(link, timeout=30, allow_redirects=True, headers={'User-Agent': 'Transmission'})
+                    req.raise_for_status()
+                    content_type = req.headers.get('Content-Type', '')
+                    if req.content.startswith(b'd8:announce'):
+                        params['metainfo'] = base64.b64encode(req.content).decode()
+                    else:
+                        log(f"Jackett link not a file (Content-Type={content_type})", level='ERROR')
+                        media['transmission_status'] = 'invalid_torrent'
+                        continue
+                except requests.RequestException as exc:
+                    log(f"Failed to download torrent from Jackett: {exc}", level='ERROR')
+                    media['transmission_status'] = 'error'
+                    continue
+            else:
+                log(f"Unsupported torrent link: {link}", level='ERROR')
+                continue
             response = self._rpc_request(
                 method='torrent-add',
-                params={
-                    'filename': media['link'],
-                    **({'download-dir': self.cfg('directory')} if self.cfg('directory') else {})
-                }
+                params=params
             )
             if response.get('torrent-duplicate'):
                 log(f"Torrent '{media.get('title')}' already exists in Transmission.")
@@ -96,7 +121,7 @@ class Transmission(ConsumerBase):
         """Make a request to the Transmission RPC API."""
         response = self._handler.post(
             endpoint=self.cfg('rpc_path', default='transmission/rpc'),
-            data={},
+            data=None,
             json={'method': method, 'arguments': params or {}},
             headers={
                 'X-Transmission-Session-Id': self._session_id
@@ -107,16 +132,21 @@ class Transmission(ConsumerBase):
         if response.status == 409:
             self._session_id = self._get_session_id()
             return self._rpc_request(method=method, params=params)
-        if not response.data or not response.data.get('arguments'):
-            log(f"Invalid response from Transmission API: {response.status}", level='WARNING')
+        if not response.data or not isinstance(response.data, dict):
+            log(f"Invalid response from Transmission API: {response.status}, {response.data}", level='WARNING')
             return {}
-        return response.data.get('arguments')
+
+        arguments = response.data.get('arguments') or {}
+        if isinstance(arguments, dict):
+            arguments['result'] = response.data.get('result')
+        return arguments
 
     def _get_session_id(self) -> str:
         """Get the session ID from the Transmission API."""
         response = self._handler.post(
             endpoint=self.cfg('rpc_path', default='transmission/rpc'),
-            data={'method': 'session-set'},
+            data=None,
+            json={'method': 'session-set'},
             auth=self._auth
         )
         session_id = response.headers.get('X-Transmission-Session-Id')

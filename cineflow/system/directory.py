@@ -68,6 +68,17 @@ class DirectoryHandler(WorkerBase):
                 log(f"Failed to create: {e}", level='WARNING')
         return False
 
+    def exists(self, item: str) -> bool:
+        """Check if item exists."""
+        item = sanitize_path(item)
+        with self._lock:
+            try:
+                if Path.exists(self._path / item):
+                    return True
+            except (OSError, ValueError) as e:
+                log(f"Failed to check existence: {e}", level='WARNING')
+        return False
+
     def export(self, item: str, media: dict) -> bool:
         """Export data to directory."""
         item = sanitize_path(item)
