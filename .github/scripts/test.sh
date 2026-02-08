@@ -35,10 +35,16 @@ else
     exit 1
 fi
 
-if python setup.py sdist bdist_wheel --dry-run; then
-    print_status "Setup.py dry-run build passed"
+print_header "📦 Testing package build..."
+
+# Ensure the 'build' package is installed
+pip install build --quiet
+
+if python -m build --sdist --wheel --outdir .tmp_build_check; then
+    print_status "Package build check passed"
+    rm -rf .tmp_build_check
 else
-    print_error "Setup.py dry-run build failed"
+    print_error "Package build check failed"
     exit 1
 fi
 
