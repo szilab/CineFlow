@@ -73,49 +73,58 @@ class Transmission(ConsumerBase):
             log("No data provided to add to Transmission.", level='MSG')
             return data
         for media in data:
-            if not media.get('link'):
-                log(f"Item '{media.get('title')}' is missing torrent link.", level='WARNING')
-                continue
-
-            params = {}
-            if self.cfg('directory'):
-                params['download-dir'] = self.cfg('directory')
-
-            link = media['link']
-            if link.startswith('magnet:'):
-                params['filename'] = link
-            elif link.startswith(('http://', 'https://')):
-                try:
-                    req = requests.get(link, timeout=30, allow_redirects=True, headers={'User-Agent': 'Transmission'})
-                    req.raise_for_status()
-                    content_type = req.headers.get('Content-Type', '')
-                    if req.content.startswith(b'd8:announce'):
-                        params['metainfo'] = base64.b64encode(req.content).decode()
-                    else:
-                        log(f"Jackett link not a file (Content-Type={content_type})", level='ERROR')
-                        media['transmission_status'] = 'invalid_torrent'
-                        continue
-                except requests.RequestException as exc:
-                    log(f"Failed to download torrent from Jackett: {exc}", level='ERROR')
-                    media['transmission_status'] = 'error'
-                    continue
-            else:
-                log(f"Unsupported torrent link: {link}", level='ERROR')
-                continue
-            response = self._rpc_request(
-                method='torrent-add',
-                params=params
-            )
-            if response.get('torrent-duplicate'):
-                log(f"Torrent '{media.get('title')}' already exists in Transmission.")
-                media['transmission_status'] = 'duplicate'
-            elif response.get('torrent-added'):
-                log(f"Torrent '{media.get('title')}' added successfully.", level='MSG')
-                media['transmission_status'] = 'added'
-            else:
-                log(f"Failed to add torrent '{media.get('title')}': {response.get('result')}", level='ERROR')
-                media['transmission_status'] = 'error'
+            if params := self._prepare_params(media=media):
+                response = self._rpc_request(method='torrent-add', params=params)
+                self._handle_response(media=media, response=response)
         return data
+
+    def _prepare_params(self, media: dict) -> dict:
+        """Prepare the parameters for the torrent add request."""
+        if not media.get('link'):
+            log(f"Item '{media.get('title')}' is missing torrent link.", level='WARNING')
+            return None
+
+        params = {}
+        if self.cfg('directory'):
+            params['download-dir'] = self.cfg('directory')
+
+        link = media['link']
+        if link.startswith('magnet:'):
+            params['filename'] = link
+            return params
+
+        if link.startswith(('http://', 'https://')):
+            return self._download_torrent(link=link, params=params, media=media)
+
+        log(f"Unsupported torrent link: {link}", level='ERROR')
+        return None
+
+    def _download_torrent(self, link: str, params: dict, media: dict) -> dict:
+        """Download the torrent file from the link."""
+        try:
+            req = requests.get(link, timeout=30, allow_redirects=True, headers={'User-Agent': 'Transmission'})
+            req.raise_for_status()
+            if req.content.startswith(b'd8:announce'):
+                params['metainfo'] = base64.b64encode(req.content).decode()
+                return params
+            log(f"Jackett link not a file (Content-Type={req.headers.get('Content-Type', '')})", level='ERROR')
+            media['transmission_status'] = 'invalid_torrent'
+        except requests.RequestException as exc:
+            log(f"Failed to download torrent from Jackett: {exc}", level='ERROR')
+            media['transmission_status'] = 'error'
+        return None
+
+    def _handle_response(self, media: dict, response: dict) -> None:
+        """Handle the response from the Transmission API."""
+        if response.get('torrent-duplicate'):
+            log(f"Torrent '{media.get('title')}' already exists in Transmission.")
+            media['transmission_status'] = 'duplicate'
+        elif response.get('torrent-added'):
+            log(f"Torrent '{media.get('title')}' added successfully.", level='MSG')
+            media['transmission_status'] = 'added'
+        else:
+            log(f"Failed to add torrent '{media.get('title')}': {response.get('result')}", level='ERROR')
+            media['transmission_status'] = 'error'
 
     def _rpc_request(self, method: str, params: dict = None) -> dict:
         """Make a request to the Transmission RPC API."""
