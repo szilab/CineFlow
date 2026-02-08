@@ -1,8 +1,8 @@
 """Transmission API consumer module."""
 
 import base64
-import requests
 from typing import List, Dict, Any
+import requests
 from cineflow.bases.module import ConsumerBase
 from cineflow.system.logger import log
 from cineflow.system.misc import sanitize_name, media_title, media_year
