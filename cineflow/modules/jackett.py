@@ -76,6 +76,8 @@ class Jackett(ConsumerBase):
         title = sanitize_name(name=media.get(titlekey))
         if not title or len(title) < 2:
             return None
+        if results := self._get_results(keywords=f"{title} {media.get('year')}"):
+            return self._apply_size_limit(results)
         if len(title) < 3:
             title = f"{title} {media.get('year')}"
         results = self._get_results(keywords=title)
@@ -115,7 +117,8 @@ class Jackett(ConsumerBase):
         if not response.data or not isinstance(response.data, dict):
             return []
         results = []
-        for item in sort_data(response.data.get('Results', []), param="Seeders", reverse=True):
+        sorted_items = sort_data(response.data.get('Results', []), param="Seeders", reverse=True)
+        for item in sorted_items:
             if media := self.map(item=item):
                 results.append(media)
         return results

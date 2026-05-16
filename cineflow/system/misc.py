@@ -8,7 +8,8 @@ def sanitize_name(name: str, replace_with: str = "") -> str:
     """Sanitize a name by removing invalid characters."""
     if not name:
         return ''
-    return re.sub(r'[\.\\\/:\*\?\!"<>\|\'\-]', replace_with, str(name))
+    name = re.sub(r'[\-]', ' ', str(name))
+    return re.sub(r'[\.\\\/:\*\?\!"<>\|\'\&]', replace_with, str(name))
 
 
 def sanitize_path(name: str, replace_with: str = "") -> str:
@@ -45,7 +46,7 @@ def media_year(title: str):
 
 def media_resolution(title: str):
     """Extract media resolution from a given string."""
-    ret = None
+    ret = 'N/A' # None
     if '360p' in title.lower():
         ret = '360p'
     if '480p' in title.lower():

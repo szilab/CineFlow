@@ -27,6 +27,10 @@ class Library(LibraryBase):
         super().__init__(config=config, required=['directory'])
         self.mappings = {
             'directory': ['directory'],
+            'title': ['title'],
+            'year': ['year'],
+            'tmdbid': ['tmdbid'],
+            'imdbid': ['imdbid'],
         }
         #     'title': ['directory'],
         #     'year': ['directory'],
@@ -53,7 +57,11 @@ class Library(LibraryBase):
             else:
                 results.append(media)
         log(f"Items in library: '{len(results)}'")
-        data = [self.map(item=item) for item in results]
+        data = []
+        for item in results:
+            mapped_item = self.map(item=item)
+            if mapped_item:
+                data.append(mapped_item)
         return data
 
     def put(self, data: List[Dict]) -> List[Dict]:

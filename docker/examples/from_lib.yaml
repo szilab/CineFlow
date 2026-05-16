@@ -21,16 +21,3 @@ steps:
     module: transmission
     action: put
     input: previous
-
-  # TODO: need to fix inverse logic
-  # - name: Collect Jellyfin existing media
-  #   module: jellyfin
-  #   action: get
-  #   input:
-  #     query:
-  #       parentLibrary: Trending
-  #       isInverse: true
-  # - name: Delete Jellyfin existing items from library
-  #   module: library
-  #   action: remove
-  #   input: previous
