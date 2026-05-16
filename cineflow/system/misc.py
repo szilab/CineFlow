@@ -46,7 +46,7 @@ def media_year(title: str):
 
 def media_resolution(title: str):
     """Extract media resolution from a given string."""
-    ret = 'N/A' # None
+    ret = 'N/A'
     if '360p' in title.lower():
         ret = '360p'
     if '480p' in title.lower():
