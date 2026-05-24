@@ -122,7 +122,9 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
                 log(f"Stop flow, error calling action '{step.get('name')}' -> {exc}", level="ERROR")
                 return
             if outp is None and step.get("action") == "get":
-                log(f"Step '{step.get('name')}' failed to retrieve data. Aborting flow to prevent logic errors.", level="ERROR")
+                log(
+                    f"Step '{step.get('name')}' failed to retrieve data. "
+                    "Aborting flow to prevent logic errors.", level="ERROR")
                 return
             if step.get("name"):
                 self._outputs[step.get("name")] = outp
