@@ -1,5 +1,5 @@
 name: Library clean up and P2P task
-delay: 30
+delay: 15
 priority: 1
 steps:
 

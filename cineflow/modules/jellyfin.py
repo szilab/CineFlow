@@ -56,7 +56,9 @@ class Jellyfin(ConsumerBase):
             results = self._get_items(query=query)
         if results is None:
             return None
-        return list({item['jellyfinid']: item for item in results if item.get('jellyfinid')}.values())
+        return list({
+            item['jellyfinid']: item for item in results if item.get('jellyfinid')
+        }.values())
 
     def search(self, media: dict) -> dict:
         """Search media for the given title."""
@@ -123,7 +125,9 @@ class Jellyfin(ConsumerBase):
 
     def _inverse_items(self, query_items: List[dict]) -> List[dict]:
         if not query_items:
-            log("Query items are empty, skipping inverse calculation to prevent library wipeout.", level="WARNING")
+            log(
+                "Query items are empty, skipping inverse calculation "
+                "to prevent library wipeout.", level="WARNING")
             return []
         all_items = self._get_items(query={}) or []
         exclude_ids = set()

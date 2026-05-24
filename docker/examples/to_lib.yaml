@@ -1,5 +1,5 @@
 name: Import media to library
-delay: 1
+delay: 60
 priority: 1
 steps:
 

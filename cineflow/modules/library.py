@@ -67,7 +67,9 @@ class Library(LibraryBase):
             if self._handler.exists(item=item):
                 existing = self._handler.imprt(item=item)
                 if existing and self._is_same_media(existing=existing, media=media):
-                    log(f"Item '{item}' already exists in library with identical metadata, skipping export.")
+                    log(
+                        f"Item '{item}' already exists in library with "
+                        "identical metadata, skipping export.")
                     continue
             if media.get('poster'):
                 image = self._create_poster(media=media)
