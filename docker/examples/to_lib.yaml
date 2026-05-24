@@ -1,5 +1,5 @@
 name: Import media to library
-delay: 2
+delay: 1
 priority: 1
 steps:
 
@@ -48,7 +48,7 @@ steps:
     input:
       data: previous
       query:
-        parentLibrary: Trending
+        parentLibrary: "Trending Filmek"
         allUsers: true
         isInverse: true
 
@@ -75,7 +75,7 @@ steps:
     input:
       data: previous
       query:
-        parentLibrary: Trending
+        parentLibrary: "Trending Filmek"
         allUsers: true
         isInverse: true
 

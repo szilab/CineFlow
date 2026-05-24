@@ -4,6 +4,7 @@ from typing import List, Dict
 from PIL import Image
 from cineflow.system.logger import log
 from cineflow.system.misc import evaluate
+from cineflow.system.misc import fix_imdbid
 from cineflow.system.image import ImageHandler
 from cineflow.bases.module import LibraryBase
 
@@ -32,15 +33,10 @@ class Library(LibraryBase):
             'tmdbid': ['tmdbid'],
             'imdbid': ['imdbid'],
         }
-        #     'title': ['directory'],
-        #     'year': ['directory'],
-        #     'tmdbid': ['directory'],
-        # }
-        # self.transforms = {
-        #     'title': lambda x: x.split(' (')[0].strip(),
-        #     'year': lambda x: x.split(' (')[1].split(')')[0],
-        #     'tmdbid': self._get_tmdbid,
-        # }
+        self.transforms = {
+            'tmdbid': lambda x: int(x) if x else None,
+            'imdbid': fix_imdbid,
+        }
 
     def get(self) -> List[Dict]:
         """Get the list of items in the library."""
@@ -68,6 +64,11 @@ class Library(LibraryBase):
         """Import the media to the library."""
         for media in data or []:
             item = self._item_name(media=media)
+            if self._handler.exists(item=item):
+                existing = self._handler.imprt(item=item)
+                if existing and self._is_same_media(existing=existing, media=media):
+                    log(f"Item '{item}' already exists in library with identical metadata, skipping export.")
+                    continue
             if media.get('poster'):
                 image = self._create_poster(media=media)
                 if self._handler.make(item=item, image=image):
@@ -77,6 +78,11 @@ class Library(LibraryBase):
                 image = None
                 log(f"Item '{media['title']}' has no poster, skipped.", level='WARNING')
         return data
+
+    def _is_same_media(self, existing: dict, media: dict) -> bool:
+        existing_data = {k: v for k, v in existing.items() if k not in ['poster', 'directory']}
+        new_data = {k: v for k, v in media.items() if k not in ['poster', 'directory']}
+        return existing_data == new_data
 
     def remove(self, data: List[Dict]) -> None:
         """Remove the media from the library."""

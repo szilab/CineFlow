@@ -42,15 +42,20 @@ class Jellyfin(ConsumerBase):
         self._user_list = self._get_users()
         self._library_list = self._get_libraries()
 
-    def get(self, query: Any = None) -> List[dict]:
+    def get(self, query: Any = None) -> List[dict] | None:
         """Collect media from Jellyfin."""
+        input_items = query if isinstance(query, list) else []
         query = self._parse_query(query)
-
+        results = None
         if query.get("isInverse"):
             del query["isInverse"]
-            results = self._inverse_items(query_items=self._get_items(query=query))
+            q_items = self._get_items(query=query)
+            if q_items is not None:
+                results = self._inverse_items(query_items=input_items or q_items)
         else:
             results = self._get_items(query=query)
+        if results is None:
+            return None
         return list({item['jellyfinid']: item for item in results if item.get('jellyfinid')}.values())
 
     def search(self, media: dict) -> dict:
@@ -63,20 +68,22 @@ class Jellyfin(ConsumerBase):
             return {}
         if isinstance(query, str):
             return {"searchTerm": query}
-        if not isinstance(query, dict):
+        if not isinstance(query, (dict, list)):
             raise ValueError("Jellyfin 'query' must be a string or a dictionary.")
-        if query.get("isInverse") and query.get("perUser"):
-            raise ValueError("Cannot set both 'isInverse' and 'perUser' in one query.")
-        if query.get("parentLibrary"):
-            if query.get("parentLibrary") not in self._library_list:
-                raise ValueError(f"Library '{query['parentLibrary']}' not found in Jellyfin.")
-            query["ParentId"] = self._library_list[query["parentLibrary"]]
-            del query["parentLibrary"]
+        if isinstance(query, dict):
+            query = dict(query)
+            if query.get("isInverse") and query.get("perUser"):
+                raise ValueError("Cannot set both 'isInverse' and 'perUser' in one query.")
+            if query.get("parentLibrary"):
+                if query.get("parentLibrary") not in self._library_list:
+                    raise ValueError(f"Library '{query['parentLibrary']}' not found in Jellyfin.")
+                query["ParentId"] = self._library_list[query["parentLibrary"]]
+                del query["parentLibrary"]
         return query
 
     def _query_user_ids(self, query: dict) -> List[dict]:
-        if not query:
-            return [None]
+        if not query or not isinstance(query, dict):
+            return [next(iter(self._user_list.values()))] if self._user_list else [None]
         if query.get("allUsers"):
             del query["allUsers"]
             users = [id for _, id in self._user_list.items()]
@@ -89,35 +96,50 @@ class Jellyfin(ConsumerBase):
             user_name = query["userName"]
             del query["userName"]
             return [self._user_list.get(user_name)]
-        return [None]
+        return [next(iter(self._user_list.values()))] if self._user_list else [None]
 
-    def _get_items(self, query: dict = None) -> List[dict]:
+    def _get_items(self, query: dict = None) -> List[dict] | None:
         results = []
         for u in self._query_user_ids(query=query):
+            params = {
+                "fields": "OriginalTitle,ParentId,ProviderIds",
+                "Recursive": "true",
+                **(query if isinstance(query, dict) else {}),
+            }
+            if self._kind:
+                params["includeItemTypes"] = self._kind
+            params = {k: v for k, v in params.items() if v is not None and v != ""}
             response = self._handler.get(
                 endpoint=f"/Users/{u}/Items" if u else "/Items",
-                params={
-                    "fields": "OriginalTitle,ParentId,ProviderIds",
-                    "Recursive": "true",
-                    "includeItemTypes": self._kind,
-                    **(query or {}),
-                },
+                params=params,
             )
+            if response.status >= 400:
+                log(f"Jellyfin API error {response.status} for query: {params}", level="ERROR")
+                return None
             if not response.data or not response.data.get('Items'):
                 continue
             results.extend(response.data.get('Items'))
-        data = [self.map(item=item) for item in results]
-        return data
+        return [self.map(item=item) for item in results]
 
     def _inverse_items(self, query_items: List[dict]) -> List[dict]:
-        all_items = self._get_items()
-        query_ids = {item['jellyfinid'] for item in query_items}
+        if not query_items:
+            log("Query items are empty, skipping inverse calculation to prevent library wipeout.", level="WARNING")
+            return []
+        all_items = self._get_items(query={}) or []
+        exclude_ids = set()
+        for item in query_items:
+            for key in ['jellyfinid', 'tmdbid', 'imdbid']:
+                if item.get(key):
+                    exclude_ids.add(str(item[key]))
         not_in_query = []
         for item in all_items:
-            if item and item.get('jellyfinid') not in query_ids:
+            found = False
+            for key in ['jellyfinid', 'tmdbid', 'imdbid']:
+                if item.get(key) and str(item[key]) in exclude_ids:
+                    found = True
+                    break
+            if not found:
                 not_in_query.append(item)
-            else:
-                log("Item already in query, skipping.")
         return not_in_query
 
     def _get_users(self):

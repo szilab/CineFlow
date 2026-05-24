@@ -36,7 +36,6 @@ class DirectoryHandler(WorkerBase):
                 raise ValueError(f"Directory path '{self._path}' is not writable.")
         except OSError as e:
             raise ValueError(f"Error creating directory '{self._path}': {e}") from e
-        self.start()
 
     def all(self) -> list:
         """Get the list of items in directory."""

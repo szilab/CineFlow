@@ -1,5 +1,6 @@
 """Flow Runner"""
 
+import copy
 import os
 from typing import Any
 import inspect
@@ -104,22 +105,25 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         super().run()
         if not self._valid:
             return
+        self._outputs = {}
         log(f"Flow '{self.name}' from file '{self._filename}' started.", level="INFO")
         for step in self.steps:
             log(f"Start step '{step.get('name')}'", level="MSG")
             outp = None
-            # TODO!!
-            # try:
-            if not (inst := self._load_module(step=step)):
+            try:
+                if not (inst := self._load_module(step=step)):
+                    return
+                if not (action := self._load_action(inst=inst, step=step)):
+                    return
+                if not (inp := self._load_input(step=step)):
+                    log(f"No input data for step '{step.get('name')}'.")
+                outp = self._call_action(action=action, inp=inp)
+            except (ValueError, TypeError) as exc:
+                log(f"Stop flow, error calling action '{step.get('name')}' -> {exc}", level="ERROR")
                 return
-            if not (action := self._load_action(inst=inst, step=step)):
+            if outp is None and step.get("action") == "get":
+                log(f"Step '{step.get('name')}' failed to retrieve data. Aborting flow to prevent logic errors.", level="ERROR")
                 return
-            if not (inp := self._load_input(step=step)):
-                log(f"No input data for step '{step.get('name')}'.")
-            outp = self._call_action(action=action, inp=inp)
-            # except (ValueError, TypeError) as exc:
-            #     log(f"Stop flow, error calling action '{step.get('name')}' -> {exc}", level="ERROR")
-            #     return
             if step.get("name"):
                 self._outputs[step.get("name")] = outp
             self._outputs['latest'] = outp
@@ -129,16 +133,20 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
     def _load_module(self, step: dict) -> ModuleBase | None:
         """Load a module by its name."""
         name = step.get('module')
-        if name in self._mod_cache:
-            mod = self._mod_cache[name]
-        else:
-            mod = load_module(name)
-        if not mod:
+        config = step.get('config') or {}
+        # Use a hash of the config to reuse instances with identical settings
+        cache_key = f"{name}_{hash(str(config))}"
+
+        if cache_key in self._mod_cache:
+            return self._mod_cache[cache_key]
+
+        if not (mod_class := load_module(name)):
             log(f"Module '{name}' not found, stop flow.", level="ERROR")
             return None
-        if name not in self._mod_cache:
-            self._mod_cache[name] = mod
-        return mod(config=step.get("config"))
+
+        instance = mod_class(config=config)
+        self._mod_cache[cache_key] = instance
+        return instance
 
     def _load_action(self, inst: ModuleBase, step: dict) -> callable:
         """Load an action function from the module."""
@@ -172,7 +180,9 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         for s in inp:
             output_key = str(s).strip("{}")
             if output_key in self._outputs:
-                merged.extend(self._outputs[output_key])
+                val = self._outputs[output_key]
+                if val is not None:
+                    merged.extend(val if isinstance(val, list) else [val])
             else:
                 log(f"Output '{output_key}' not found in outputs.", level="WARNING")
         return merged
@@ -188,9 +198,10 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
 
     def _handle_dict_input(self, inp: dict) -> dict:
         """Handle dictionary input, resolving 'previous' data reference."""
-        if inp.get("data") == "previous":
-            inp["data"] = self._outputs.get('latest')
-        return inp
+        new_inp = copy.deepcopy(inp)
+        if new_inp.get("data") == "previous":
+            new_inp["data"] = self._outputs.get('latest')
+        return new_inp
 
     def _call_action(self, action: callable, inp: Any) -> Any:
         """Call the action with the provided input data."""

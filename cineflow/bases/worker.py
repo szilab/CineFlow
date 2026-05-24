@@ -8,6 +8,7 @@ from threading import Thread, Event
 class WorkerBase(ABC):
     """Base class for workers."""
     def __init__(self):
+        self.name = self.__class__.__name__.lower()
         self._running = False
         self._delay = 120
         self._thread = None
@@ -34,10 +35,13 @@ class WorkerBase(ABC):
         self._stop_event.clear()
         if self._thread and self._thread.is_alive():
             return
+        thread_name = self.__class__.__name__.lower()
+        if hasattr(self, 'name') and isinstance(self.name, str):
+            thread_name = f"{thread_name}:{self.name}"
         self._thread = Thread(
             target=self.worker,
             daemon=True,
-            name=self.__class__.__name__.lower()
+            name=thread_name
         )
         self._thread.start()
 

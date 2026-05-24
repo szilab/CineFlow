@@ -1,5 +1,5 @@
 name: Library clean up and P2P task
-delay: 5
+delay: 30
 priority: 1
 steps:
 
@@ -8,7 +8,7 @@ steps:
     action: get
     input:
       query:
-        parentLibrary: Trending
+        parentLibrary: "Trending Filmek"
         isFavorite: true
         allUsers: true
   - name: Add Jackett data

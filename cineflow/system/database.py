@@ -81,7 +81,7 @@ class Database(WorkerBase, metaclass=SingletonMeta):
                     (source, data.get('title'), data.get('year'), data.get('kind'), bytes_data, dt.now().timestamp(),)
                 )
                 self._conn.commit()
-                log(f"Added media to cache DB: {data.title} ({data.year})")
+                log(f"Added media to cache DB: {data.get('title')} ({data.get('year')})")
             except (AttributeError, sqlite3.Error) as e:
                 log(f"Error storing media in cache DB: {e}", level="WARNING")
 

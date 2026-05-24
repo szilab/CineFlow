@@ -55,7 +55,7 @@ class Logger():
             thread = thread.replace('MainThread', 'main')
             message = (
                 f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] " +
-                f" ({level[:4]} from {thread[:10]})".ljust(26) +
+                f" ({level[:4].ljust(4)} from {thread[:28]})".ljust(43) +
                 message
             )
             if self._colors:
