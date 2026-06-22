@@ -3,7 +3,7 @@
 import os
 import json
 from typing import List, Dict
-from cineflow.system.logger import log
+from cineflow.core.logger import log
 
 
 class Tools():  # pylint: disable=too-few-public-methods

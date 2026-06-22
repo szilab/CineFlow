@@ -151,10 +151,29 @@ MODULENAME_SETTING=xy
 
 ```
 cineflow/
-├── bases
-├── modules
-├── system
-└── main.py
+├── main.py                 # Application entry point
+├── core/                   # Framework internals
+│   ├── bases/              # Abstract base classes
+│   │   ├── module.py       # ModuleBase, ConsumerBase, LibraryBase
+│   │   ├── worker.py       # WorkerBase (threaded execution)
+│   │   └── singleton.py    # SingletonMeta metaclass
+│   ├── config.py           # Configuration management (YAML + ENV)
+│   ├── database.py         # SQLite cache database
+│   ├── logger.py           # Structured logging
+│   └── runner.py           # Workflow orchestration engine
+├── integrations/           # External service integrations
+│   ├── tmdb.py             # TMDb metadata API
+│   ├── jackett.py          # Jackett torrent indexer
+│   ├── jellyfin.py         # Jellyfin media server
+│   └── transmission.py     # Transmission download client
+├── internal/               # Internal modules (not external APIs)
+│   ├── library.py          # File system library management
+│   └── tools.py            # Utility tools (export/import/dedup)
+└── utils/                  # Pure utility functions
+    ├── directory.py        # Directory operations
+    ├── image.py            # Image processing (posters)
+    ├── misc.py             # Helpers (sanitize, evaluate, load_module)
+    └── request.py          # HTTP request handler with caching/rate-limit
 ```
 
 ## Roadmap

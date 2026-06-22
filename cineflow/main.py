@@ -1,10 +1,10 @@
 """Main"""
 
 import time
-from cineflow.system.logger import log
-from cineflow.system.config import Config
-from cineflow.system.database import Database
-from cineflow.system.runner import FlowManager
+from cineflow.core.logger import log
+from cineflow.core.config import Config
+from cineflow.core.database import Database
+from cineflow.core.runner import FlowManager
 
 
 class MainApp:
