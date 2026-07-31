@@ -50,7 +50,7 @@ class Tmdb(ConsumerBase):
         page = 1
         while len(collected) < self.limit or page > 20:
             response = self._handler.get(
-                endpoint=f"/trending/{self.kind}",
+                endpoint=f"/trending/{self.kind}/week",
                 params={
                     'page': page, 'append_to_response': 'external_ids',
                     'with_watch_monetization_types': 'flatrate',

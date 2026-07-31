@@ -9,7 +9,7 @@ from threading import Lock
 from pathlib import Path
 from cineflow.utils.image import ImageHandler
 from cineflow.core.logger import log
-from cineflow.utils.misc import sanitize_path
+from cineflow.utils.misc import sanitize_path, media_resolution
 from cineflow.core.bases.worker import WorkerBase
 
 
@@ -49,7 +49,7 @@ class DirectoryHandler(WorkerBase):
             log(f"Error listing items: {e}", level='WARNING')
         return []
 
-    def make(self, item: str, image: ImageHandler = None) -> bool:
+    def make(self, item: str, image: ImageHandler = None, resolution: str = None) -> bool:
         """Make an item and file."""
         item = sanitize_path(item)
         file = re.split(r'[\(\[]', item, maxsplit=1)[0].strip() + '.mkv'
@@ -58,7 +58,12 @@ class DirectoryHandler(WorkerBase):
                 if not Path.exists(self._path / item):
                     os.makedirs(self._path / item, exist_ok=True)
                     log(f"Item '{item}' created successfully.")
-                Path(self._path / item / file).touch(exist_ok=True)
+                media_dir = self._media_directory()
+                if media_dir and self._copy_sample(file_path=self._path / item / file, media_dir=media_dir, resolution=resolution):
+                    log(f"Media file for item '{item}' created from sample ({resolution or 'default'}).")
+                else:
+                    Path(self._path / item / file).touch(exist_ok=True)
+                    log(f"Media file for item '{item}' created as placeholder.")
                 if image:
                     image.save(str(self._path / item))
                     log(f"Image for item '{item}' saved successfully.")
@@ -105,7 +110,7 @@ class DirectoryHandler(WorkerBase):
                 log(f"Data for item '{item}' imported successfully.")
                 return media
             except (OSError, ValueError) as e:
-                log(f"Failed to import data: {e}", level='WARNING')
+                log(f"Failed to import data: {e}", level='DEBUG')
         return {}
 
     def remove(self, item: str) -> bool:
@@ -150,6 +155,28 @@ class DirectoryHandler(WorkerBase):
                     continue
         log(f"End library cleanup for path '{self._path}'")
 
+    def _media_directory(self) -> Path | None:
+        """Get the media sample directory path."""
+        # Try environment variable first
+        media_path = Path(os.environ.get("MEDIA_DIRECTORY", "/app/media"))
+        if media_path.exists() and media_path.is_dir():
+            sample_files = list(media_path.glob("sample.*.mp4"))
+            if sample_files:
+                return media_path
+            log(f"Media directory '{media_path}' exists but no sample files found.", level='DEBUG')
+        else:
+            log(f"Media directory '{media_path}' not found.", level='DEBUG')        
+        return None
+
+    def _copy_sample(self, file_path: Path, media_dir: Path, resolution: str = None) -> bool:
+        """Copy a sample file matching the resolution to the destination path."""
+        source = media_dir / f"sample.{resolution}.mp4"
+        if source.exists():
+            shutil.copy2(str(source), str(file_path))
+            return True
+        log(f"No exact sample match for resolution '{resolution}'.", level='DEBUG')
+        return False
+    
     @property
     def max_item_age(self) -> int:
         return self._max_item_age

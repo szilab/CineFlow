@@ -10,6 +10,7 @@ ENV GID=1000 \
     EXPORT_DIRECTORY=/library \
     CFG_DIRECTORY=/config \
     EXAMPLES_DIRECTORY=/tmp/examples \
+    MEDIA_DIRECTORY=/app/media \
     LOG_LEVEL=INFO \
     LOG_COLORS=false \
     PYTHONUNBUFFERED=1 \
@@ -33,6 +34,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --force-reinstall $WHEEL_FILE[all]
 
 COPY docker/examples/*.* $EXAMPLES_DIRECTORY/
+COPY docker/media/ $MEDIA_DIRECTORY/
 
 VOLUME ["$CFG_DIRECTORY", "$EXPORT_DIRECTORY"]
 

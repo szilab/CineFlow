@@ -73,7 +73,7 @@ class Library(LibraryBase):
                     continue
             if media.get('poster'):
                 image = self._create_poster(media=media)
-                if self._handler.make(item=item, image=image):
+                if self._handler.make(item=item, image=image, resolution=media.get('resolution')):
                     media['directory'] = item
                     self._handler.export(item=item, media=media)
             else:
