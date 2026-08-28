@@ -10,6 +10,7 @@ from pathlib import Path
 from cineflow.utils.image import ImageHandler
 from cineflow.core.logger import log
 from cineflow.utils.misc import sanitize_path
+from cineflow.runtime import export_directory, media_directory
 
 
 class DirectoryHandler:
@@ -24,7 +25,7 @@ class DirectoryHandler:
         self._lock = Lock()
         if not directory:
             raise ValueError("Directory name must be provided.")
-        self._root = Path(os.environ.get("EXPORT_DIRECTORY", "/library")).resolve()
+        self._root = export_directory()
         self._path = self._resolve_library_path(directory)
         if self._path.exists() and not self._path.is_dir():
             raise ValueError(f"Directory path '{self._path}' exists but is not a directory.")
@@ -173,8 +174,7 @@ class DirectoryHandler:
 
     def _media_directory(self) -> Path | None:
         """Get the media sample directory path."""
-        # Try environment variable first
-        media_path = Path(os.environ.get("MEDIA_DIRECTORY", "/app/media"))
+        media_path = media_directory()
         if media_path.exists() and media_path.is_dir():
             sample_files = list(media_path.glob("sample.*.mp4"))
             if sample_files:

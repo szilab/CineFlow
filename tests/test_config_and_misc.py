@@ -99,6 +99,13 @@ def test_media_parsing_sorting_and_module_lookup() -> None:
     assert load_module("not_a_module") is None
 
 
+def test_module_lookup_uses_registries_without_scanning_files(monkeypatch) -> None:
+    monkeypatch.setattr("pathlib.Path.iterdir", lambda _path: pytest.fail("filesystem scan"))
+
+    assert load_module("tmdb").__name__ == "Tmdb"
+    assert load_module("library").__name__ == "Library"
+
+
 def test_parallel_module_loading_does_not_deadlock() -> None:
     """Sibling modules can be imported concurrently in a fresh interpreter."""
     code = """

@@ -1,11 +1,15 @@
-"""Main"""
+"""CineFlow application and command-line entry point."""
 
+import argparse
 import signal
 import threading
+from collections.abc import Sequence
+from cineflow import __version__
 from cineflow.core.logger import log
 from cineflow.core.config import Config
 from cineflow.core.database import Database
 from cineflow.core.runner import FlowManager
+from cineflow.runtime import bootstrap_configuration
 
 
 class MainApp:
@@ -58,8 +62,17 @@ class MainApp:
         log("Application shutdown complete", level="INFO")
 
 
-def main():
-    """Main function"""
+def _parse_args(argv: Sequence[str] | None = None) -> None:
+    """Parse informational command-line options before runtime initialization."""
+    parser = argparse.ArgumentParser(description="CineFlow media automation worker")
+    parser.add_argument("--version", action="version", version=f"CineFlow {__version__}")
+    parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None):
+    """Run the long-lived CineFlow worker."""
+    _parse_args(argv)
+    bootstrap_configuration()
     app = MainApp()
 
     def shutdown(_signum, _frame):

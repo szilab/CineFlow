@@ -13,6 +13,7 @@ from cineflow.core.bases.module import ModuleBase
 from cineflow.core.bases.worker import WorkerBase
 from cineflow.core.logger import log
 from cineflow.utils.misc import load_module
+from cineflow.runtime import config_directory
 
 
 class FlowManager(WorkerBase):
@@ -30,7 +31,7 @@ class FlowManager(WorkerBase):
                 level="WARNING"
             )
             self._delay = 60
-        self._dir = os.environ.get("CFG_DIRECTORY", "/config")
+        self._dir = str(config_directory())
         self._flows = {}
         self._flow_hashes = {}
         self._next_due = {}

@@ -1,7 +1,5 @@
 """Miscellaneous functions for the system library."""
-import importlib
 import re
-from pathlib import Path
 
 
 def sanitize_name(name: str, replace_with: str = "") -> str:
@@ -108,20 +106,12 @@ def evaluate(left: str, right: str, expression: str, wcase: bool = True) -> bool
 
 
 def load_module(name: str) -> object:
-    """Load a module by its name from integrations/ or internal/ directories."""
-    search_dirs = ['integrations', 'internal']
-    for dir_name in search_dirs:
-        directory = Path(__file__).resolve().parent.parent / dir_name
-        if not directory.exists():
-            continue
-        for file in directory.iterdir():
-            if not str(file).endswith(".py") or str(file).startswith("__"):
-                continue
-            if name == str(file.name)[:-3]:
-                module_obj = importlib.import_module(f"cineflow.{dir_name}.{name}")
-                class_name = f"{name[0].capitalize()}{name[1:]}"
-                if hasattr(module_obj, class_name):
-                    return getattr(module_obj, class_name)
+    """Load a workflow module through the canonical package registries."""
+    from cineflow import integrations, internal
+
+    for registry in (integrations, internal):
+        if module := registry.load_module(name):
+            return module
     return None
 
 

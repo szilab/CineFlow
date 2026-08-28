@@ -44,7 +44,21 @@ config/
 └── custom_flow.yaml
 ```
 
-When running the Docker image with an empty configuration directory, the bundled example configuration is copied into it automatically.
+When either supported distribution starts with an empty configuration directory,
+the bundled example configuration is copied into it automatically. Existing files
+are never overwritten.
+
+Runtime paths are controlled by the following variables:
+
+- `CINEFLOW_HOME` sets the application root for default `config`, `library`, and `media` directories.
+- `CFG_DIRECTORY` explicitly sets the configuration directory.
+- `EXPORT_DIRECTORY` explicitly sets the exported-library directory.
+- `MEDIA_DIRECTORY` optionally points to external `sample.<resolution>.mp4` files.
+
+The three explicit directory variables take precedence over `CINEFLOW_HOME`.
+Without overrides, the standalone Windows executable uses its own directory as
+the application root. Docker defines its existing `/config`, `/library`, and
+`/app/media` paths through environment variables.
 
 ## Global Configuration
 

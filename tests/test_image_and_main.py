@@ -84,12 +84,26 @@ def test_main_initializes_shuts_down_and_entrypoint(monkeypatch) -> None:
     monkeypatch.setattr(
         "cineflow.main.signal.signal", lambda signum, handler: handlers.setdefault(signum, handler)
     )
-    main()
+    monkeypatch.setattr("cineflow.main.bootstrap_configuration", lambda: ())
+    main([])
     assert calls[-1] == "run"
     assert len(handlers) == 2
     for handler in handlers.values():
         handler(None, None)
     assert calls[-2:] == ["signal-shutdown", "signal-shutdown"]
+
+
+def test_version_exits_without_initializing_application(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "cineflow.main.MainApp", lambda: (_ for _ in ()).throw(AssertionError("initialized"))
+    )
+
+    try:
+        main(["--version"])
+    except SystemExit as exc:
+        assert exc.code == 0
+
+    assert capsys.readouterr().out.startswith("CineFlow ")
 
 
 def test_shutdown_leaves_dependencies_open_when_flow_close_times_out() -> None:

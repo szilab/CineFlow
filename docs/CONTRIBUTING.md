@@ -196,6 +196,16 @@ def test_tmdb_search():
 uv build
 ```
 
+The wheel is an internal build artifact used by the Docker pipeline; it is not
+an end-user distribution format.
+
+### Build Windows Executable
+
+```powershell
+uv run pyinstaller --clean --noconfirm packaging/windows/CineFlow.spec
+.\dist\CineFlow.exe --version
+```
+
 ### Build Docker Image
 
 Run the provided script: `.github/scripts/docker-build.sh`

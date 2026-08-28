@@ -1,7 +1,7 @@
 # CineFlow
 
 [![CI/CD Pipeline](https://github.com/szilab/CineFlow/actions/workflows/ci_cd.yaml/badge.svg)](https://github.com/szilab/CineFlow/actions/workflows/ci_cd.yaml)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Windows standalone](https://img.shields.io/badge/Windows-standalone-blue.svg)](https://github.com/szilab/CineFlow/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 CineFlow is an open-source, configuration-driven media automation system for discovering, managing, and organizing media collections.
@@ -70,7 +70,7 @@ CineFlow runs as a **long-lived worker process**, not a one-shot CLI tool.
 - CineFlow continuously evaluates and executes workflows
 - No external scheduler (cron/systemd) is required
 
-This makes CineFlow suitable for always-on automation, especially in Docker environments.
+This makes CineFlow suitable for always-on automation on Windows or in Docker environments.
 
 ---
 
@@ -119,13 +119,12 @@ Current default examples include:
 
 ---
 
-## Prerequisites
+## Integration prerequisites
 
 The exact prerequisites depend on the workflows you enable.
 
 For the supplied example workflows:
 
-- Python >= 3.13 or Docker
 - TMDb API key ([Request here](https://www.themoviedb.org/settings/api))
 - Jackett instance with configured trackers
 - Jellyfin media server
@@ -137,7 +136,26 @@ Plex can be used by workflows where appropriate. Future Radarr, Sonarr, Trakt, a
 
 ## Installation & Running
 
-### Docker (Recommended)
+The supported distributions are the standalone Windows executable from GitHub
+Releases and the Docker image from GitHub Container Registry.
+
+### Windows standalone
+
+1. Download `CineFlow-windows-x64.exe` from the latest [GitHub Release](https://github.com/szilab/CineFlow/releases).
+2. Put it in the directory where you want CineFlow to live.
+3. Run the executable. CineFlow generates `config` beside it and uses `library` for exports.
+4. Edit the generated YAML files under `config`, then restart CineFlow.
+
+No Python, Docker, Docker Desktop, or WSL installation is required. CineFlow is
+a console application and continues running until you close it or press Ctrl+C.
+
+To confirm the downloaded version without starting the worker:
+
+```powershell
+.\CineFlow-windows-x64.exe --version
+```
+
+### Docker
 
 #### Docker Run
 
@@ -174,46 +192,6 @@ When running via Docker:
 * If the configuration directory is empty, **default example flows are copied automatically**
 * These flows provide a ready-to-use automation setup
 
-### Local development (Windows)
-
-Install [uv](https://docs.astral.sh/uv/) once:
-
-```powershell
-winget install --id=astral-sh.uv -e
-```
-
-Clone the project and create the managed development environment. No virtual
-environment activation is needed:
-
-```powershell
-git clone https://github.com/szilab/CineFlow.git
-cd CineFlow
-uv sync
-```
-
-Run CineFlow:
-
-```powershell
-uv run cineflow
-# Or: uv run python -m cineflow.main
-```
-
-For development, use the tools through uv:
-
-```powershell
-uv run pytest
-uv run pytest --cov=cineflow --cov-report=term-missing
-uv run flake8 .
-uv run pylint cineflow
-uv build
-```
-
-CI enforces a minimum line coverage of 75%. For a local HTML report, run
-`uv run pytest --cov=cineflow --cov-report=html`.
-
-To install a release wheel outside a development checkout, use `uv tool install`
-or `uv pip install` in the environment where CineFlow will run.
-
 ## Configuration
 
 CineFlow currently uses a dual YAML configuration system:
@@ -231,13 +209,19 @@ For detailed syntax and examples, see:
 
 ### Environment Variables
 
-- `CFG_DIRECTORY`: Configuration directory path
-- `EXPORT_DIRECTORY`: Library export path
+- `CINEFLOW_HOME`: Application root used for default `config`, `library`, and `media` paths
+- `CFG_DIRECTORY`: Configuration directory path; overrides `CINEFLOW_HOME` for configuration
+- `EXPORT_DIRECTORY`: Library export path; overrides `CINEFLOW_HOME` for exports
+- `MEDIA_DIRECTORY`: Optional directory containing external `sample.<resolution>.mp4` files
 - `DB_DIRECTORY`: SQLite cache database directory
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
 - `LOG_COLORS`: Enable colored logs (true/false)
 
 Module settings may be overridden through environment variables. See `docs/CONFIGURATION.md` for current behavior and known limitations.
+
+Explicit directory variables have highest priority. In the Windows executable,
+the executable's directory is the default application root. Docker supplies
+explicit `/config`, `/library`, and `/app/media` paths, so its layout is unchanged.
 
 Module configuration precedence is global configuration, then flow-step `config`, then environment override. Environment overrides preserve an existing boolean, integer, or float type; values without a type hint remain strings.
 
