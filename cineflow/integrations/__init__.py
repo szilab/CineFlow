@@ -4,6 +4,9 @@ External service integrations.
 Each module provides a consumer class that interfaces with an external API.
 New integrations should be added here and will be auto-discovered.
 """
+# Pylint cannot infer exports supplied by the module-level __getattr__ registry.
+# pylint: disable=undefined-all-variable
+
 from importlib import import_module
 import sys
 from typing import Any
