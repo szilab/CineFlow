@@ -49,9 +49,15 @@ class Jellyfin(ConsumerBase):
         results = None
         if query.get("isInverse"):
             del query["isInverse"]
+            inverse_query = {
+                key: query[key] for key in ("allUsers", "userName") if query.get(key)
+            }
             q_items = self._get_items(query=query)
             if q_items is not None:
-                results = self._inverse_items(query_items=input_items or q_items)
+                results = self._inverse_items(
+                    query_items=input_items or q_items,
+                    query=inverse_query,
+                )
         else:
             results = self._get_items(query=query)
         if results is None:
@@ -123,31 +129,20 @@ class Jellyfin(ConsumerBase):
             results.extend(response.data.get('Items'))
         return [self.map(item=item) for item in results]
 
-    def _inverse_items(self, query_items: List[dict]) -> List[dict] | None:
-        if not query_items:
-            log(
-                "Query items are empty, skipping inverse calculation "
-                "to prevent library wipeout.", level="WARNING")
-            return []
-        all_items = self._get_items(query={})
+    def _inverse_items(
+        self, query_items: List[dict], query: dict = None
+    ) -> List[dict] | None:
+        all_items = self._get_items(query=query or {})
         if all_items is None:
             log("Failed to query the Jellyfin library for inverse calculation.", level="ERROR")
             return None
-        exclude_ids = set()
-        for item in query_items:
-            for key in ['jellyfinid', 'tmdbid', 'imdbid']:
-                if item.get(key):
-                    exclude_ids.add(str(item[key]))
-        not_in_query = []
-        for item in all_items:
-            found = False
-            for key in ['jellyfinid', 'tmdbid', 'imdbid']:
-                if item.get(key) and str(item[key]) in exclude_ids:
-                    found = True
-                    break
-            if not found:
-                not_in_query.append(item)
-        return not_in_query
+        query_ids = {
+            str(item['jellyfinid']) for item in query_items if item.get('jellyfinid')
+        }
+        return [
+            item for item in all_items
+            if item.get('jellyfinid') and str(item['jellyfinid']) not in query_ids
+        ]
 
     def _get_users(self):
         response = self._handler.get(

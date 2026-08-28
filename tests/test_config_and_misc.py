@@ -1,5 +1,8 @@
 """Configuration and pure utility behavior tests."""
 
+import subprocess
+import sys
+
 import pytest
 
 from cineflow.core.config import Config, cfg
@@ -94,6 +97,37 @@ def test_media_parsing_sorting_and_module_lookup() -> None:
     assert sort_data([{"year": 2023}, {"year": 2024}], "year", reverse=True)[0]["year"] == 2024
     assert load_module("tools").__name__ == "Tools"
     assert load_module("not_a_module") is None
+
+
+def test_parallel_module_loading_does_not_deadlock() -> None:
+    """Sibling modules can be imported concurrently in a fresh interpreter."""
+    code = """
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
+from cineflow.utils.misc import load_module
+
+barrier = Barrier(2)
+
+def load(name):
+    barrier.wait()
+    return load_module(name).__name__
+
+with ThreadPoolExecutor(max_workers=2) as executor:
+    results = list(executor.map(load, ("jackett", "jellyfin")))
+
+assert results == ["Jackett", "Jellyfin"], results
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 @pytest.mark.parametrize(

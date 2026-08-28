@@ -94,11 +94,15 @@ def test_get_libraries_empty_success_has_empty_metadata_error() -> None:
         client._get_libraries()
 
 
-def test_inverse_empty_query_input_returns_empty_list() -> None:
-    """An empty exclusion set remains protected from destructive inversion."""
+def test_inverse_empty_query_input_returns_full_library() -> None:
+    """The inverse of a successfully empty library is the full library."""
     client = jellyfin()
+    library_items = [
+        {'title': 'Supergirl', 'year': '2026', 'jellyfinid': 'library-copy'},
+    ]
+    client._get_items = Mock(return_value=library_items)
 
-    assert client._inverse_items([]) == []
+    assert client._inverse_items([]) == library_items
 
 
 def test_inverse_full_library_failure_returns_none() -> None:
@@ -115,3 +119,83 @@ def test_inverse_empty_full_library_returns_empty_list() -> None:
     client._get_items = Mock(return_value=[])
 
     assert client._inverse_items([{'jellyfinid': 'included'}]) == []
+
+
+def test_inverse_uses_jellyfin_record_ids_for_library_membership() -> None:
+    """Copies in separate libraries remain distinct despite shared provider IDs."""
+    client = jellyfin()
+    trending_copy = {
+        'title': 'Supergirl', 'year': '2026', 'jellyfinid': 'trending-copy',
+        'tmdbid': '400160', 'imdbid': '1234567',
+    }
+    library_copy = {
+        'title': 'Supergirl', 'year': '2026', 'jellyfinid': 'library-copy',
+        'tmdbid': '400160', 'imdbid': '1234567',
+    }
+    client._get_items = Mock(return_value=[trending_copy, library_copy])
+
+    assert client._inverse_items([trending_copy]) == [library_copy]
+
+
+def test_inverse_unique_excludes_media_found_outside_trending_library() -> None:
+    """The import filter rejects media that has a distinct copy in another library."""
+    client = jellyfin()
+    client._library_list = {'Trending Filmek': 'trending'}
+    trending_copy = {
+        'title': 'Supergirl', 'year': '2026', 'jellyfinid': 'trending-copy',
+        'tmdbid': '400160',
+    }
+    library_copy = {
+        'title': 'Supergirl', 'year': '2026', 'jellyfinid': 'library-copy',
+        'tmdbid': '400160',
+    }
+    client._get_items = Mock(side_effect=[
+        [trending_copy],
+        [trending_copy, library_copy],
+    ])
+    candidate = {'title': 'Supergirl', 'year': '2026', 'tmdbid': '400160'}
+    query = {'parentLibrary': 'Trending Filmek', 'allUsers': True, 'isInverse': True}
+
+    assert client.unique([candidate], query) == []
+    assert client._get_items.call_args_list[1].kwargs['query'] == {'allUsers': True}
+
+
+def test_inverse_common_selects_old_trending_item_for_cleanup() -> None:
+    """A Trending placeholder is selected for removal after a real copy appears."""
+    client = jellyfin()
+    client._library_list = {'Trending Filmek': 'trending'}
+    trending_copy = {
+        'title': 'Supergirl', 'year': '2026', 'jellyfinid': 'trending-copy',
+        'tmdbid': '400160',
+    }
+    library_copy = {
+        'title': 'Supergirl', 'year': '2026', 'jellyfinid': 'library-copy',
+        'tmdbid': '400160',
+    }
+    client._get_items = Mock(side_effect=[
+        [trending_copy],
+        [trending_copy, library_copy],
+    ])
+    local_placeholder = {
+        'title': 'Supergirl', 'year': '2026', 'tmdbid': '400160',
+    }
+    query = {'parentLibrary': 'Trending Filmek', 'allUsers': True, 'isInverse': True}
+
+    assert client.common([local_placeholder], query) == [local_placeholder]
+
+
+def test_inverse_common_cleans_old_item_when_trending_query_is_empty() -> None:
+    """Cleanup still finds external copies before Jellyfin indexes Trending."""
+    client = jellyfin()
+    client._library_list = {'Trending Filmek': 'trending'}
+    library_copy = {
+        'title': 'Supergirl', 'year': '2026', 'jellyfinid': 'library-copy',
+        'tmdbid': '400160',
+    }
+    client._get_items = Mock(side_effect=[[], [library_copy]])
+    local_placeholder = {
+        'title': 'Supergirl', 'year': '2026', 'tmdbid': '400160',
+    }
+    query = {'parentLibrary': 'Trending Filmek', 'allUsers': True, 'isInverse': True}
+
+    assert client.common([local_placeholder], query) == [local_placeholder]
