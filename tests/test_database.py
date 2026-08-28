@@ -64,6 +64,13 @@ def test_request_cache_replaces_matching_hash(database: Database) -> None:
     assert database.get_request("request-hash") == {"version": "second"}
 
 
+@pytest.mark.parametrize("data", [[], {}])
+def test_request_cache_preserves_successful_empty_values(database: Database, data: object) -> None:
+    database.store_request("empty-request", data)
+
+    assert database.get_request("empty-request") == data
+
+
 def test_existing_nonempty_database_gets_missing_schema(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

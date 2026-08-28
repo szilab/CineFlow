@@ -154,9 +154,9 @@ class Database(WorkerBase, metaclass=SingletonMeta):
                 return None
         return self._get_cached_data(data, self._default_expire, f"Media: {title} ({year})")
 
-    def store_request(self, rhash: str, data: dict[str, Any]) -> None:
+    def store_request(self, rhash: str, data: Any) -> None:
         """Store request data in the database."""
-        if not data or not rhash:
+        if data is None or not rhash:
             log(f"Empty data or hash cannot store in cache: {data}, {rhash}")
             return
         with self._lock:

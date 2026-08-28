@@ -103,3 +103,18 @@ def test_tools_exports_imports_and_removes_duplicate_identity(tmp_path, monkeypa
     assert tools.data_import("data.json") == data
     assert tools.data_import("missing.json") == []
     assert tools.remove_duplicates(data) == [data[0], data[2]]
+
+
+def test_tools_export_creates_nested_directory_and_removes_adjacent_duplicates(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DEBUG_DIRECTORY", str(tmp_path / "debug"))
+    tools = Tools()
+    data = [
+        {"title": "First", "year": 2024, "imdbid": 1},
+        {"title": "Duplicate", "year": 2024, "imdbid": 1},
+        {"title": "Duplicate again", "year": 2024, "imdbid": 1},
+    ]
+
+    tools.data_export(data, "nested/data.json")
+
+    assert tools.data_import("nested/data.json") == data
+    assert tools.remove_duplicates(data) == [data[0]]

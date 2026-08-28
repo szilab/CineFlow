@@ -145,3 +145,20 @@ Development work is based on the `develop` branch unless the task explicitly sta
 Do not reset, overwrite, or discard unrelated working-tree changes.
 
 Do not commit or push unless explicitly requested.
+
+When explicitly asked to push a commit, also monitor the GitHub Actions runs
+triggered by that push through to completion. If a run fails, inspect the
+failed job and its logs before deciding whether to act.
+
+The requested push authorizes a minimal follow-up commit and push only when
+the failure has a clearly safe fix that preserves all application features and
+behavior. Safe fixes are limited to CI, build, test, packaging, or tooling
+corrections; they must not change public configuration formats, flow behavior,
+runtime features, release behavior, secrets, permissions, or deployment
+configuration. Validate the repair with the relevant local checks before
+pushing it and continue monitoring the resulting workflow run.
+
+If the cause is uncertain, the repair could affect application behavior, the
+failure concerns infrastructure, credentials, secrets, permissions, or a
+deployment, or the repair fails again, do not push a follow-up change. Report
+the diagnosis and ask for direction instead.

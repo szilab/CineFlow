@@ -4,6 +4,8 @@ import random
 from abc import ABC, abstractmethod
 from threading import Thread, Event
 
+from cineflow.core.logger import log
+
 
 class WorkerBase(ABC):
     """Base class for workers."""
@@ -26,7 +28,10 @@ class WorkerBase(ABC):
     def worker(self) -> None:
         """Worker thread for the consumer."""
         while self._running:
-            self.run()
+            try:
+                self.run()
+            except Exception as exc:  # pylint: disable=broad-except
+                log(f"Worker '{self.name}' failed: {exc}", level='ERROR')
             self._stop_event.wait(timeout=self._delay * 60)
 
     def start(self) -> None:
