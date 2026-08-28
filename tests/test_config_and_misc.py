@@ -2,7 +2,6 @@
 
 import pytest
 
-from cineflow.core.bases.singleton import SingletonMeta
 from cineflow.core.config import Config, cfg
 from cineflow.utils.misc import (
     evaluate,
@@ -17,14 +16,6 @@ from cineflow.utils.misc import (
 )
 
 
-@pytest.fixture(autouse=True)
-def clear_config_singleton() -> None:
-    """Keep each test's configuration file isolated."""
-    SingletonMeta._instances.pop(Config, None)
-    yield
-    SingletonMeta._instances.pop(Config, None)
-
-
 def test_config_persists_nested_values_and_honors_defaults(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
     config = Config()
@@ -34,6 +25,14 @@ def test_config_persists_nested_values_and_honors_defaults(tmp_path, monkeypatch
     assert config.get("missing", default="fallback") == "fallback"
     assert cfg("tmdb.language", value="en") == "en"
     assert config.get("tmdb") == {"token": "secret", "language": "en"}
+
+
+def test_config_uses_suite_isolated_directory(isolated_config_directory) -> None:
+    """The default test configuration never depends on the runtime /config path."""
+    config = Config()
+
+    assert config._file == str(isolated_config_directory / "config.yaml")
+    assert isolated_config_directory.is_dir()
 
 
 def test_config_required_and_environment_module_override(tmp_path, monkeypatch) -> None:

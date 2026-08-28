@@ -127,3 +127,12 @@ def test_none_ok_statuses_uses_raise_for_status(monkeypatch: pytest.MonkeyPatch)
 def test_invalid_ok_statuses_are_rejected() -> None:
     with pytest.raises(TypeError, match="ok_statuses"):
         handler().ok_statuses = [200]
+
+
+def test_default_headers_are_not_shared_between_handlers() -> None:
+    first = handler()
+    second = handler()
+
+    first.headers["X-Request-ID"] = "first"
+
+    assert "X-Request-ID" not in second.headers

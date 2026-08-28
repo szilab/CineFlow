@@ -8,11 +8,11 @@ from cineflow.core.bases.module import ConsumerBase
 class FakeConsumer(ConsumerBase):
     """Minimal consumer with deterministic remote results."""
 
-    def __init__(self, results: list[dict]) -> None:
+    def __init__(self, results: list[dict] | None) -> None:
         super().__init__(url="https://example.invalid")
         self.results = results
 
-    def get(self, query=None) -> list[dict]:
+    def get(self, query=None) -> list[dict] | None:
         return self.results
 
     def search(self, media: dict) -> dict:
@@ -41,6 +41,10 @@ def test_unique_returns_input_when_remote_results_are_empty(media: list[dict]) -
     assert FakeConsumer([]).unique(media) == media
 
 
+def test_unique_returns_empty_when_remote_query_fails(media: list[dict]) -> None:
+    assert FakeConsumer(None).unique(media) == []
+
+
 @pytest.mark.parametrize("kind", ["movie", "tv"])
 def test_kind_accepts_supported_values(kind: str) -> None:
     consumer = FakeConsumer([])
@@ -56,6 +60,16 @@ def test_kind_rejects_unsupported_values(kind: str | None) -> None:
 
     with pytest.raises(ValueError, match="Kind must be either"):
         consumer.kind = kind
+
+
+def test_limit_can_be_updated_and_keeps_its_minimum_value() -> None:
+    consumer = FakeConsumer([])
+
+    consumer.limit = 2
+    assert consumer.limit == 10
+    consumer.limit = 25
+
+    assert consumer.limit == 25
 
 
 def test_match_uses_title_and_year_without_ids() -> None:

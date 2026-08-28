@@ -32,7 +32,7 @@ class RequestHandler:
         """Initialize the request handler."""
         self._url = (url or '').rstrip('/')
         self._params = {}
-        self._headers = self.DEFAULT_HEADERS
+        self._headers = self.DEFAULT_HEADERS.copy()
         self._rate_limiter = RateLimiter()
         self._cache_handler = CacheHandler(cache_time=0)
         self._ok_statuses = {200, 201, 202, 204}  # HTTP OK statuses

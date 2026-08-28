@@ -15,7 +15,7 @@ class ModuleBase():
     def __init__(self, config: dict = None, required: list = None) -> None:
         """Initialize the module."""
         self.name = self.__class__.__name__.lower()
-        self._cfg = config or {}
+        self._cfg = dict(config or {})
         if cfg(key=self.name):
             self._cfg.update(cfg(key=self.name))
         self._data_mappings = {
@@ -198,6 +198,9 @@ class ConsumerBase(ModuleBase, ABC):
             log("No data received for operation, empty list returned.")
             return []
         results = self.get(query=query)
+        if results is None:
+            log("Remote query failed, refusing to operate on local data.", level='WARNING')
+            return []
         if not results:
             log("No results returned by the query, nothing to operate on.")
             return [] if operation == 'common' else data
@@ -276,7 +279,7 @@ class ConsumerBase(ModuleBase, ABC):
         return self._limit
 
     @limit.setter
-    def get_limit(self, value: int) -> None:
+    def limit(self, value: int) -> None:
         self._limit = max(value, 10)
 
 

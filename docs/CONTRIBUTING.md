@@ -23,7 +23,7 @@ This project adheres to a code of conduct. By participating, you are expected to
 
 ### Prerequisites
 
-- **Python 3.10+** - Required for development
+- **Python 3.13+** - Required for development
 - **Git** - Version control
 - **uv** - Python package and environment manager
 - **Docker** (optional) - For containerized development and testing

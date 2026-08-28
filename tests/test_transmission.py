@@ -42,9 +42,19 @@ def test_rpc_stops_after_second_409() -> None:
     client._handler.post.side_effect = [response(409), response(409)]
     client._get_session_id = Mock(return_value='new-session')
 
-    assert client._rpc_request('torrent-get') == {}
+    assert client._rpc_request('torrent-get') is None
     assert client._handler.post.call_count == 2
     client._get_session_id.assert_called_once_with()
+
+
+def test_rpc_protocol_failure_is_not_treated_as_an_empty_success() -> None:
+    """A Transmission-level failure remains distinct from an empty torrent list."""
+    client = transmission()
+    client._handler.post.return_value = response(
+        200, {'arguments': {'torrents': []}, 'result': 'invalid argument'}
+    )
+
+    assert client._rpc_request('torrent-get') is None
 
 
 def test_session_id_is_read_from_409_response_header() -> None:
@@ -90,6 +100,13 @@ def test_get_filters_torrents_and_search_uses_alternate_title() -> None:
     assert client.search({"title": "Film", "alttitle": "Alt", "year": 2024})["title"] == "Alt"
 
 
+def test_get_preserves_rpc_failure_as_none() -> None:
+    client = transmission()
+    client._rpc_request = Mock(return_value=None)
+
+    assert client.get() is None
+
+
 def test_put_prepares_magnet_and_http_torrents(monkeypatch) -> None:
     """Download input is converted to the RPC forms accepted by Transmission."""
     client = transmission()
@@ -120,3 +137,13 @@ def test_put_records_rpc_outcomes() -> None:
     assert client.put(data) == data
     assert data[0]["transmission_status"] == "added"
     assert client.put([]) == []
+
+
+def test_put_marks_rpc_failure_as_error() -> None:
+    client = transmission()
+    client._prepare_params = Mock(return_value={"filename": "magnet"})
+    client._rpc_request = Mock(return_value=None)
+    data = [{"title": "Film"}]
+
+    assert client.put(data) == data
+    assert data[0]["transmission_status"] == "error"

@@ -32,13 +32,15 @@ def test_module_rejects_invalid_and_incomplete_items() -> None:
 
 def test_module_configuration_and_properties(monkeypatch) -> None:
     monkeypatch.setenv("SAMPLEMODULE_SETTING", "environment")
-    module = SampleModule({"setting": "file", "nested": {"value": 3}})
+    supplied_config = {"setting": "file", "nested": {"value": 3}}
+    module = SampleModule(supplied_config)
     assert module.cfg("setting") == "environment"
     assert module.cfg("nested.value") == 3
     module.mappings = {"title": ["title"], "year": ["year"]}
     module.transforms = {}
     assert module.mappings == {"title": ["title"], "year": ["year"]}
     assert module.transforms == {}
+    assert supplied_config == {"setting": "file", "nested": {"value": 3}}
 
 
 def test_module_required_configuration_is_enforced() -> None:

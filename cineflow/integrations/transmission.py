@@ -37,10 +37,13 @@ class Transmission(ConsumerBase):
             'year': media_year,
         }
 
-    def get(self, query: Any = None) -> List[Dict]:
+    def get(self, query: Any = None) -> List[Dict] | None:
         """Get torrents from the Transmission API."""
         fields = ['id', 'name', 'status', 'percentDone', 'totalSize']
         data = self._rpc_request(method='torrent-get', params={'fields': fields})
+        if data is None:
+            log("Failed to retrieve torrents from Transmission API.", level='ERROR')
+            return None
         if data.get('torrents'):
             data = data['torrents']
         else:
@@ -114,8 +117,9 @@ class Transmission(ConsumerBase):
             media['transmission_status'] = 'error'
         return None
 
-    def _handle_response(self, media: dict, response: dict) -> None:
+    def _handle_response(self, media: dict, response: dict | None) -> None:
         """Handle the response from the Transmission API."""
+        response = response or {}
         if response.get('torrent-duplicate'):
             log(f"Torrent '{media.get('title')}' already exists in Transmission.")
             media['transmission_status'] = 'duplicate'
@@ -126,7 +130,7 @@ class Transmission(ConsumerBase):
             log(f"Failed to add torrent '{media.get('title')}': {response.get('result')}", level='ERROR')
             media['transmission_status'] = 'error'
 
-    def _rpc_request(self, method: str, params: dict = None) -> dict:
+    def _rpc_request(self, method: str, params: dict = None) -> dict | None:
         """Make a request to the Transmission RPC API."""
         for attempt in range(2):
             response = self._handler.post(
@@ -142,14 +146,18 @@ class Transmission(ConsumerBase):
                 self._session_id = self._get_session_id()
                 continue
             log("Transmission session refresh failed after one RPC retry.", level='ERROR')
-            return {}
+            return None
         if not response.data or not isinstance(response.data, dict):
             log(f"Invalid response from Transmission API: {response.status}, {response.data}", level='WARNING')
-            return {}
+            return None
 
+        result = response.data.get('result')
+        if result != 'success':
+            log(f"Transmission RPC '{method}' failed: {result}", level='ERROR')
+            return None
         arguments = response.data.get('arguments') or {}
         if isinstance(arguments, dict):
-            arguments['result'] = response.data.get('result')
+            arguments['result'] = result
         return arguments
 
     def _get_session_id(self) -> str:
