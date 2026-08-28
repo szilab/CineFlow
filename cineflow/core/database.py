@@ -204,11 +204,20 @@ class Database(WorkerBase, metaclass=SingletonMeta):
         self._table_cleanup("request")
         log(f"End database cleanup for db '{self._file.name}'")
 
-    def close(self) -> None:
-        """Close the database connection."""
+    def close(self) -> bool:
+        """Close the database connection when its cleanup worker has terminated."""
+        if self._thread is not None and not self.stop():
+            log(
+                f"Database cleanup worker for '{self._file.name}' is still running; "
+                "connection left open.", level="WARNING"
+            )
+            return False
         if self._conn:
             self._conn.close()
+            self._conn = None
+            self._cursor = None
             log(f"Database connection closed for '{self._file.name}'")
+        return True
 
     def _table_cleanup(self, table: str) -> None:
         """Cleanup old entries from a known cache table."""

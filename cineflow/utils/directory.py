@@ -10,18 +10,15 @@ from pathlib import Path
 from cineflow.utils.image import ImageHandler
 from cineflow.core.logger import log
 from cineflow.utils.misc import sanitize_path
-from cineflow.core.bases.worker import WorkerBase
 
 
-class DirectoryHandler(WorkerBase):
+class DirectoryHandler:
     """Directory handler class."""
     DEFAULT_MIN_ITEM_AGE = 30
     DEFAULT_MIN_ITEM_COUNT = 10
 
     def __init__(self, directory: str) -> None:
         """Initialize the directory handler."""
-        super().__init__()
-        self.delay = 360
         self._max_item_age = self.DEFAULT_MIN_ITEM_AGE
         self._max_item_count = self.DEFAULT_MIN_ITEM_COUNT
         self._lock = Lock()
@@ -126,28 +123,27 @@ class DirectoryHandler(WorkerBase):
                 log(f"Failed to removing: {e}")
         return False
 
-    def run(self):
-        """Run method for WorkerBase to run libraray cleanup periodicly."""
+    def cleanup(self) -> None:
+        """Synchronously remove items exceeding configured age or count limits."""
         log(f"Start library cleanup for path '{self._path}'")
-        dir_list = self.all()
-        # Sort by creation time, newest first
-        dir_list.sort(key=lambda x: x.stat().st_ctime, reverse=True)
-        i = 1
-        for item in dir_list:
+        with self._lock:
             try:
-                if i > self.max_item_count:
-                    log(f"Found excess item: {item}")
-                    self.remove(item)
-                    continue
-                file_age = time.time() - item.stat().st_ctime
-                if file_age > self.max_item_age * 24 * 60 * 60:
-                    log(f"Found old item: {item}")
-                    self.remove(item)
-                    continue
-                i += 1
+                dir_list = [item for item in self._path.iterdir() if item.is_dir()]
+                dir_list.sort(key=lambda item: item.stat().st_ctime, reverse=True)
             except OSError as e:
-                log(f"Failed to clean item '{item}': {e}", level='WARNING')
-                continue
+                log(f"Error listing items for cleanup: {e}", level='WARNING')
+                return
+            kept = 0
+            for item in dir_list:
+                try:
+                    file_age = time.time() - item.stat().st_ctime
+                    if kept >= self.max_item_count or file_age > self.max_item_age * 86400:
+                        log(f"Found expired or excess item: {item}")
+                        shutil.rmtree(item)
+                        continue
+                    kept += 1
+                except OSError as e:
+                    log(f"Failed to clean item '{item}': {e}", level='WARNING')
         log(f"End library cleanup for path '{self._path}'")
 
     def _resolve_library_path(self, directory: str) -> Path:

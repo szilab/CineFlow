@@ -18,7 +18,12 @@ class FakeFlow:
         self.file = file
         self.name = Path(file).stem
         self.priority = 99
-        self._valid = "invalid" not in Path(file).read_text(encoding="utf-8")
+        content = Path(file).read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        self.enabled = parsed.get("enabled", True) if isinstance(parsed, dict) else True
+        self.delay = parsed.get("delay", 60) if isinstance(parsed, dict) else 60
+        self.priority = parsed.get("priority", 99) if isinstance(parsed, dict) else 99
+        self._valid = "invalid" not in content and isinstance(self.enabled, bool)
         self.started = 0
         self.stopped = 0
         self.runs = 0
@@ -27,11 +32,16 @@ class FakeFlow:
     def start(self) -> None:
         self.started += 1
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         self.stopped += 1
+        return True
 
     def run(self) -> None:
         self.runs += 1
+
+    @property
+    def valid(self) -> bool:
+        return self._valid
 
 
 @pytest.fixture
@@ -47,6 +57,29 @@ def manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> runner.FlowManag
 
 def test_manager_discovers_new_flow(manager: runner.FlowManager, tmp_path: Path) -> None:
     flow_file = tmp_path / "first.yaml"
+    flow_file.write_text("version: one", encoding="utf-8")
+
+    manager.run()
+
+    assert manager._flows[str(flow_file)].started == 1
+
+
+@pytest.mark.parametrize(("enabled", "starts"), [(True, 1), (False, 0)])
+def test_parallel_manager_respects_flow_enabled(
+    manager: runner.FlowManager, tmp_path: Path, enabled: bool, starts: int
+) -> None:
+    flow_file = tmp_path / "flow.yaml"
+    flow_file.write_text(yaml.safe_dump({"enabled": enabled}), encoding="utf-8")
+
+    manager.run()
+
+    assert manager._flows[str(flow_file)].started == starts
+
+
+def test_parallel_manager_starts_flow_when_enabled_is_missing(
+    manager: runner.FlowManager, tmp_path: Path
+) -> None:
+    flow_file = tmp_path / "flow.yaml"
     flow_file.write_text("version: one", encoding="utf-8")
 
     manager.run()
@@ -109,7 +142,75 @@ def test_manager_reloads_changed_flow(manager: runner.FlowManager, tmp_path: Pat
     assert replacement.started == 1
 
 
-def test_invalid_modified_flow_replaces_stale_flow(manager: runner.FlowManager, tmp_path: Path) -> None:
+def test_manager_defers_changed_flow_while_previous_is_alive(
+    manager: runner.FlowManager, tmp_path: Path
+) -> None:
+    flow_file = tmp_path / "flow.yaml"
+    flow_file.write_text("version: one", encoding="utf-8")
+    manager.run()
+    original = manager._flows[str(flow_file)]
+    original.stop = Mock(return_value=False)
+    flow_file.write_text("version: two", encoding="utf-8")
+
+    manager.run()
+
+    assert manager._flows[str(flow_file)] is original
+    assert len(FakeFlow.instances) == 1
+
+
+def test_manager_disables_running_flow_on_reload(
+    manager: runner.FlowManager, tmp_path: Path
+) -> None:
+    flow_file = tmp_path / "flow.yaml"
+    flow_file.write_text(yaml.safe_dump({"enabled": True}), encoding="utf-8")
+    manager.run()
+    original = manager._flows[str(flow_file)]
+    flow_file.write_text(yaml.safe_dump({"enabled": False}), encoding="utf-8")
+
+    manager.run()
+
+    replacement = manager._flows[str(flow_file)]
+    assert original.stopped == 1
+    assert replacement.enabled is False
+    assert replacement.started == 0
+
+
+def test_manager_enables_disabled_flow_on_reload(
+    manager: runner.FlowManager, tmp_path: Path
+) -> None:
+    flow_file = tmp_path / "flow.yaml"
+    flow_file.write_text(yaml.safe_dump({"enabled": False}), encoding="utf-8")
+    manager.run()
+    original = manager._flows[str(flow_file)]
+    flow_file.write_text(yaml.safe_dump({"enabled": True}), encoding="utf-8")
+
+    manager.run()
+
+    replacement = manager._flows[str(flow_file)]
+    assert original.stopped == 1
+    assert replacement.enabled is True
+    assert replacement.started == 1
+
+
+def test_manager_defers_disabling_flow_while_previous_is_alive(
+    manager: runner.FlowManager, tmp_path: Path
+) -> None:
+    flow_file = tmp_path / "flow.yaml"
+    flow_file.write_text(yaml.safe_dump({"enabled": True}), encoding="utf-8")
+    manager.run()
+    original = manager._flows[str(flow_file)]
+    original.stop = Mock(return_value=False)
+    flow_file.write_text(yaml.safe_dump({"enabled": False}), encoding="utf-8")
+
+    manager.run()
+
+    assert manager._flows[str(flow_file)] is original
+    assert len(FakeFlow.instances) == 1
+
+
+def test_invalid_modified_flow_replaces_stale_flow(
+    manager: runner.FlowManager, tmp_path: Path
+) -> None:
     flow_file = tmp_path / "flow.yaml"
     flow_file.write_text("valid", encoding="utf-8")
     manager.run()
@@ -175,6 +276,72 @@ def test_execution_mode_is_deterministic(
     assert flow_manager._exec_mode == expected
     assert flow.started == starts
     assert flow.runs == (1 if expected == "sequential" else 0)
+
+
+def test_sequential_manager_skips_disabled_flow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeFlow.instances = []
+    flow_file = tmp_path / "flow.yaml"
+    flow_file.write_text(yaml.safe_dump({"enabled": False}), encoding="utf-8")
+    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
+    monkeypatch.setattr(runner, "Flow", FakeFlow)
+    monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: "sequential")
+
+    flow_manager = runner.FlowManager()
+    flow_manager.run()
+
+    assert flow_manager._flows[str(flow_file)].runs == 0
+
+
+def test_sequential_manager_respects_due_times_priority_and_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeFlow.instances = []
+    clock = Mock(return_value=100.0)
+    execution_order = []
+    monkeypatch.setattr(runner.time, "monotonic", clock)
+    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
+    monkeypatch.setattr(runner, "Flow", FakeFlow)
+    monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: "sequential")
+    fast_file = tmp_path / "fast.yaml"
+    slow_file = tmp_path / "slow.yaml"
+    disabled_file = tmp_path / "disabled.yaml"
+    fast_file.write_text(yaml.safe_dump({"delay": 1, "priority": 20}), encoding="utf-8")
+    slow_file.write_text(yaml.safe_dump({"delay": 5, "priority": 10}), encoding="utf-8")
+    disabled_file.write_text(yaml.safe_dump({"enabled": False}), encoding="utf-8")
+    flow_manager = runner.FlowManager()
+
+    flow_manager.run()
+    fast = flow_manager._flows[str(fast_file)]
+    slow = flow_manager._flows[str(slow_file)]
+    disabled = flow_manager._flows[str(disabled_file)]
+    fast.run = lambda: (execution_order.append("fast"), setattr(fast, "runs", fast.runs + 1))
+    slow.run = lambda: (execution_order.append("slow"), setattr(slow, "runs", slow.runs + 1))
+    assert [slow.runs, fast.runs, disabled.runs] == [1, 1, 0]
+
+    clock.return_value = 159.0
+    flow_manager.run()
+    assert [slow.runs, fast.runs] == [1, 1]
+
+    clock.return_value = 160.0
+    flow_manager.run()
+    assert [slow.runs, fast.runs] == [1, 2]
+
+    clock.return_value = 400.0
+    flow_manager.run()
+    assert [slow.runs, fast.runs] == [2, 3]
+    assert execution_order[-2:] == ["slow", "fast"]
+
+    fast_file.write_text(yaml.safe_dump({"delay": 10, "priority": 20}), encoding="utf-8")
+    clock.return_value = 401.0
+    flow_manager.run()
+    replacement = flow_manager._flows[str(fast_file)]
+    assert replacement is not fast
+    assert replacement.runs == 1
+    assert replacement.started == 0
 
 
 def test_refresh_delay_prefers_correctly_spelled_environment_variable(
@@ -244,6 +411,38 @@ def test_action_exception_aborts_iteration_and_allows_later_run(flow_factory) ->
     assert ActionModule.calls[-2:] == [("get", None), ("follow", "result")]
 
 
+@pytest.mark.parametrize(("configured", "expected"), [(None, True), (True, True), (False, False)])
+def test_flow_parses_boolean_enabled(
+    tmp_path: Path, configured: bool | None, expected: bool
+) -> None:
+    data = {"steps": [{"module": "fake", "action": "get"}]}
+    if configured is not None:
+        data["enabled"] = configured
+    flow_file = tmp_path / "enabled.yaml"
+    flow_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    flow = runner.Flow(str(flow_file))
+
+    assert flow._valid is True
+    assert flow.enabled is expected
+
+
+@pytest.mark.parametrize("configured", ["false", 1, "yes-as-string"])
+def test_flow_rejects_non_boolean_enabled(
+    tmp_path: Path, configured: object
+) -> None:
+    flow_file = tmp_path / "invalid-enabled.yaml"
+    flow_file.write_text(yaml.safe_dump({
+        "enabled": configured,
+        "steps": [{"module": "fake", "action": "get"}],
+    }), encoding="utf-8")
+
+    flow = runner.Flow(str(flow_file))
+
+    assert flow._valid is False
+    assert flow.enabled is False
+
+
 @pytest.mark.parametrize("result", [None, []])
 def test_get_failure_only_treats_none_as_failure(flow_factory, result: object) -> None:
     flow = flow_factory([
@@ -275,3 +474,22 @@ def test_flow_propagates_previous_output(flow_factory, input_value: object) -> N
     flow.run()
 
     assert ActionModule.calls[-1] == ("follow", output if input_value != ["{{source}}"] else [])
+
+
+def test_flow_stop_request_aborts_before_next_step(flow_factory) -> None:
+    flow = flow_factory([
+        {"name": "first", "module": "fake", "action": "get"},
+        {"name": "later", "module": "fake", "action": "follow", "input": "previous"},
+    ])
+    original_call = flow._call_action
+
+    def stop_after_action(action, inp):
+        result = original_call(action, inp)
+        flow.stop()
+        return result
+
+    flow._call_action = stop_after_action
+
+    flow.run()
+
+    assert ActionModule.calls == [("get", None)]

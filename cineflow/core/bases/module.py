@@ -1,5 +1,6 @@
 """Base class for API consumer clients."""
 
+import copy
 from typing import List, Dict, Any
 from abc import ABC, abstractmethod
 from cineflow.core.logger import log
@@ -9,15 +10,25 @@ from cineflow.utils.request import RequestHandler
 from cineflow.utils.directory import DirectoryHandler
 
 
+def _merge_config(base: dict, override: dict) -> dict:
+    """Return a recursive configuration merge without mutating either input."""
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_config(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
 class ModuleBase():
     """Consumer base class"""
 
     def __init__(self, config: dict = None, required: list = None) -> None:
         """Initialize the module."""
         self.name = self.__class__.__name__.lower()
-        self._cfg = dict(config or {})
-        if cfg(key=self.name):
-            self._cfg.update(cfg(key=self.name))
+        global_config = cfg(key=self.name) or {}
+        self._cfg = _merge_config(global_config, config or {})
         self._data_mappings = {
             'title': ['title'],
             'year': ['year'],

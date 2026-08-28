@@ -7,10 +7,10 @@ This document describes how CineFlow processes workflows (“flows”), how they
 A **flow** is a YAML-defined workflow executed periodically by the background worker.
 Each flow:
 * Has a name and schedule configuration
-* Defines an ordered list of modules
-* Passes data between modules
+* Defines an ordered list of steps
+* Passes data between steps
 * Can be enabled/disabled independently
-Flows are executed by the FlowManager, which extends WorkerBase and runs in its own thread. Each flow runs independently and respects its own delay configuration.
+Flows are discovered by the FlowManager. In `parallel` mode, each enabled and valid flow has its own worker. In `sequential` mode, the manager executes due flows one at a time. Both modes respect each flow's individual delay.
 
 ## 2. Flow Configuration
 
@@ -33,17 +33,16 @@ Default example flows are shipped with the Docker image and copied automatically
 * FlowManager
   * Loads configured flows
   * Executes enabled flows
-  * Handles delay logic per flow
+  * Tracks each flow's next due time in sequential mode
 
 Execution pattern:
+
+```text
+parallel: one worker per enabled flow
+sequential: manager refresh → select due flows → priority order → execute one at a time
 ```
-Worker thread
-    → Iterate enabled flows
-        → Execute modules sequentially
-        → Sleep according to flow delay
-        → Repeat
-```
-Each flow has its own delay configuration, allowing different polling intervals for different automation tasks.
+
+Each flow has its own delay configuration, allowing different polling intervals for different automation tasks. Sequential mode does not create flow worker threads.
 
 ## 4. Flow YAML Structure
 
@@ -56,19 +55,21 @@ name: trending-to-transmission
 enabled: true
 delay: 60   # minutes
 
-modules:
-  - name: tmdb_trending
+steps:
+  - name: Collect trending movies
+    module: tmdb
+    action: get
     config:
       media_type: movie
       time_window: week
 
-  - name: jackett_search
+  - name: Find torrents
+    module: jackett
+    action: enrich
+    input: previous
     config:
       min_seeders: 5
 
-  - name: jellyfin_export
-    config:
-      library: Trending
 ```
 
 ## 5. Flow Properties
@@ -78,14 +79,17 @@ modules:
 | `name`	 | string  | Unique flow identifier                 |
 | `enabled`	 | boolean | Whether flow runs                      |
 | `delay`	 | integer | Delay in minutes between executions    |
-| `modules`	 | list	   | Ordered list of module definitions     |
+| `steps`	 | list	   | Ordered list of step definitions       |
 
 ## 6. Module Definition
 
-Each module entry contains:
+Each step contains:
 
 ```yaml
-- name: module_name
+- name: Descriptive step name
+  module: module_name
+  action: get
+  input: previous
   config:
     key: value
 ```
@@ -129,11 +133,14 @@ name: trending-automation
 enabled: true
 delay: 120  # minutes
 
-modules:
-  - name: tmdb_trending
-  - name: extend_with_jackett
-  - name: jellyfin_sync
-  - name: transmission_add
+steps:
+  - name: Collect trending
+    module: tmdb
+    action: get
+  - name: Extend with torrents
+    module: jackett
+    action: enrich
+    input: previous
 ```
 
 ### 8.2 Favorites Sync Flow
@@ -148,10 +155,18 @@ name: favorites-download
 enabled: true
 delay: 30  # minutes
 
-modules:
-  - name: jellyfin_favorites
-  - name: jackett_search
-  - name: transmission_add
+steps:
+  - name: Collect favorites
+    module: jellyfin
+    action: get
+  - name: Find torrents
+    module: jackett
+    action: enrich
+    input: previous
+  - name: Download
+    module: transmission
+    action: put
+    input: previous
 ```
 
 ## 9. Duplicate Handling
@@ -179,11 +194,13 @@ enabled: false
 Disabled flows:
 * Are loaded
 * Are not executed
-* Can be re-enabled without restarting (if configuration reload is supported)
+* Can be re-enabled without restarting
 
 ## 12. Execution Timing Strategy
 
-Each flow manages its own interval:
+In parallel mode each flow worker manages its own interval. In sequential mode the manager stores a monotonic next-due timestamp for every enabled, valid flow. Newly discovered or reloaded flows are eligible during that manager refresh; after execution, next due is completion time plus `delay * 60` seconds.
+
+Conceptually:
 ```
 execute()
 sleep(delay * 60)
@@ -217,6 +234,6 @@ CineFlow flow system is designed to be:
 * FlowManager loads YAML
 * Enabled flows are registered
 * Worker thread starts
-* Flow executes modules sequentially
+* Flow executes steps sequentially
 * Delay is applied
 * Loop continues

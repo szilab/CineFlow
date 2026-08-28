@@ -1,6 +1,7 @@
 """Image transformations and application lifecycle behavior."""
 
 from io import BytesIO
+import threading
 
 from PIL import Image
 
@@ -65,7 +66,52 @@ def test_main_initializes_shuts_down_and_entrypoint(monkeypatch) -> None:
     monkeypatch.setattr("cineflow.main.FlowManager", lambda: Component("flow"))
     app = MainApp()
     app.shutdown()
-    assert calls == ["close:flow", "stop:flow", "close:database", "stop:database", "close:config", "stop:config"]
-    monkeypatch.setattr("cineflow.main.MainApp", lambda: type("App", (), {"run": lambda self: calls.append("run")})())
+    app.shutdown()
+    assert calls == [
+        "stop:flow", "stop:database", "stop:config",
+        "close:flow", "close:database", "close:config",
+    ]
+
+    class SignalApp:
+        def run(self):
+            calls.append("run")
+
+        def shutdown(self):
+            calls.append("signal-shutdown")
+
+    monkeypatch.setattr("cineflow.main.MainApp", SignalApp)
+    handlers = {}
+    monkeypatch.setattr(
+        "cineflow.main.signal.signal", lambda signum, handler: handlers.setdefault(signum, handler)
+    )
     main()
     assert calls[-1] == "run"
+    assert len(handlers) == 2
+    for handler in handlers.values():
+        handler(None, None)
+    assert calls[-2:] == ["signal-shutdown", "signal-shutdown"]
+
+
+def test_shutdown_leaves_dependencies_open_when_flow_close_times_out() -> None:
+    calls = []
+
+    class Component:
+        def __init__(self, name, close_result=True):
+            self.name = name
+            self.close_result = close_result
+
+        def stop(self):
+            calls.append(f"stop:{self.name}")
+            return self.close_result
+
+        def close(self):
+            calls.append(f"close:{self.name}")
+            return self.close_result
+
+    app = MainApp.__new__(MainApp)
+    app._shutdown_event = threading.Event()
+    app._components = [Component("database"), Component("flow", close_result=False)]
+
+    app.shutdown()
+
+    assert calls == ["stop:flow", "stop:database", "close:flow"]

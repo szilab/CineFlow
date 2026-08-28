@@ -40,6 +40,7 @@ class Library(LibraryBase):
 
     def get(self) -> List[Dict]:
         """Get the list of items in the library."""
+        self._handler.cleanup()
         results = []
         directories = self._handler.all()
         for directory in directories:

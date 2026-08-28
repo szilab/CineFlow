@@ -13,6 +13,10 @@ class FakeHandler:
         self.items = {}
         self.created = []
         self.removed = []
+        self.cleanups = 0
+
+    def cleanup(self):
+        self.cleanups += 1
 
     def all(self):
         return [Path(name) for name in self.items]
@@ -56,6 +60,7 @@ def test_library_get_maps_valid_entries_and_retains_unknown_directories() -> Non
     handler.items = {"Known (2024)": {"title": "Known", "year": 2024}, "odd-name": {}}
     result = library(handler).get()
     assert result == [{"title": "Known", "year": 2024}]
+    assert handler.cleanups == 1
 
 
 def test_library_put_skips_identical_media_and_exports_poster(monkeypatch) -> None:
@@ -72,6 +77,19 @@ def test_library_put_skips_identical_media_and_exports_poster(monkeypatch) -> No
     instance.put([changed])
     assert handler.created == [("Film (2024) [tmdbid-8]", "poster-image", "1080p")]
     assert changed["directory"] == "Film (2024) [tmdbid-8]"
+
+
+def test_library_put_then_get_keeps_new_item_visible_to_downstream(monkeypatch) -> None:
+    handler = FakeHandler()
+    instance = library(handler)
+    monkeypatch.setattr(instance, "_create_poster", lambda media: "poster-image")
+    media = {"title": "New", "year": 2026, "poster": "url"}
+
+    instance.put([media])
+    result = instance.get()
+
+    assert result == [{"directory": "New (2026)", "title": "New", "year": 2026}]
+    assert handler.cleanups == 1
 
 
 def test_library_remove_and_poster_rules(monkeypatch) -> None:

@@ -176,6 +176,8 @@ Any setting from `config.yaml` can be overridden via environment variables using
 MODULENAME_SETTING=xy
 ```
 
+Module configuration precedence is global configuration, then flow-step `config`, then environment override. Environment overrides preserve an existing boolean, integer, or float type; values without a type hint remain strings.
+
 ## Project Structure
 
 ```
