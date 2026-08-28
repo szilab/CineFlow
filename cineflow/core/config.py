@@ -71,16 +71,40 @@ class Config(metaclass=SingletonMeta):
     @staticmethod
     def getfrom(config: dict, key: str, module: str = None, default: Any = None) -> Any:
         """Get a value from a given config dictionary"""
-        if module and f"{module}_{key}".upper() in os.environ:
-            return os.environ[f"{module}_{key}".upper()]
-        if key in config:
-            return config[key]
-        for current_key in key.split("."):
-            if current_key in config:
-                config = config[current_key]
-            else:
-                config = None
-                break
-        if config is None and default is not None:
+        value = config.get(key) if key in config else None
+        if key not in config:
+            value = config
+            for current_key in key.split("."):
+                if isinstance(value, dict) and current_key in value:
+                    value = value[current_key]
+                else:
+                    value = None
+                    break
+        hint = value if value is not None else default
+        environment_key = f"{module}_{key}".upper() if module else None
+        if environment_key and environment_key in os.environ:
+            return Config._convert_environment(os.environ[environment_key], hint, environment_key)
+        if value is None and default is not None:
             return default
-        return config
+        return value
+
+    @staticmethod
+    def _convert_environment(value: str, hint: Any, key: str) -> Any:
+        """Convert an environment override only when configuration supplies a type hint."""
+        try:
+            if isinstance(hint, bool):
+                normalized = value.casefold()
+                if normalized in {"true", "1", "yes", "on"}:
+                    return True
+                if normalized in {"false", "0", "no", "off"}:
+                    return False
+                raise ValueError("expected true/false, 1/0, yes/no, or on/off")
+            if isinstance(hint, int):
+                return int(value)
+            if isinstance(hint, float):
+                return float(value)
+            return value
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid environment value for '{key}': {value!r} ({exc})"
+            ) from exc

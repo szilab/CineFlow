@@ -45,6 +45,38 @@ def test_config_required_and_environment_module_override(tmp_path, monkeypatch) 
 
 
 @pytest.mark.parametrize(
+    ("environment", "configured", "default", "expected"),
+    [
+        ("true", False, None, True),
+        ("OFF", True, None, False),
+        ("50", 10, None, 50),
+        ("1.25", 0.5, None, 1.25),
+        ("ordinary", "configured", None, "ordinary"),
+        ("012345", None, None, "012345"),
+        ("42", None, 1, 42),
+    ],
+)
+def test_environment_override_preserves_known_types(
+    monkeypatch, environment, configured, default, expected
+) -> None:
+    monkeypatch.setenv("TMDB_VALUE", environment)
+    config = {} if configured is None else {"value": configured}
+
+    assert Config.getfrom(config, "value", module="tmdb", default=default) == expected
+
+
+@pytest.mark.parametrize(
+    ("environment", "hint"),
+    [("maybe", False), ("twelve", 1), ("many", 1.0)],
+)
+def test_malformed_typed_environment_override_raises(monkeypatch, environment, hint) -> None:
+    monkeypatch.setenv("TMDB_VALUE", environment)
+
+    with pytest.raises(ValueError, match="TMDB_VALUE"):
+        Config.getfrom({"value": hint}, "value", module="tmdb")
+
+
+@pytest.mark.parametrize(
     ("value", "expected"),
     [("Movie.Name-2024!", "MovieName 2024"), ("", ""), ("a/b:c", "abc")],
 )

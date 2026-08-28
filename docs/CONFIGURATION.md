@@ -17,10 +17,18 @@ CineFlow uses **two configuration layers**:
 1. **Global Configuration**  
    Defines system-wide settings and integration credentials.
 
-2. **Flow Configuration**  
+2. **Flow Configuration**
    Defines automation logic, execution frequency, rules, and actions.
 
 Both are written in **YAML**.
+
+Module settings use this precedence, from lowest to highest:
+
+```text
+global module configuration < flow step config < environment override
+```
+
+Unchanged global keys remain available when a step overrides another key. Environment values inherit the type of the configured value or lookup default for booleans, integers, and floats. Boolean values accept `true/false`, `1/0`, `yes/no`, and `on/off` (case-insensitive). Values without a type hint remain strings; malformed typed values raise a configuration error.
 
 ---
 
@@ -161,6 +169,10 @@ library:
 * directory – subdirectory name inside EXPORT_DIRECTORY
 * limit – maximum number of items kept
 * age – maximum age in days before removal
+
+Age and count cleanup runs synchronously when the Library is read with its normal
+`get` action, before entries are returned. It uses no separate cleanup worker and
+cannot overlap filesystem operations on the same Library handler.
 
 #### Poster Rules
 

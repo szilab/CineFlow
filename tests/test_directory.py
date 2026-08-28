@@ -37,7 +37,7 @@ def test_cleanup_removes_expired_item_without_nested_lock_deadlock(
     old_item.mkdir()
     monkeypatch.setattr(directory.time, "time", lambda: old_item.stat().st_ctime + 31 * 24 * 60 * 60)
 
-    library.run()
+    library.cleanup()
 
     assert not old_item.exists()
 
@@ -51,7 +51,7 @@ def test_cleanup_removes_count_excess_without_nested_lock_deadlock(
     for item in items:
         item.mkdir()
 
-    library.run()
+    library.cleanup()
 
     assert len(library.all()) == 10
 
@@ -67,3 +67,12 @@ def test_destructive_item_operation_cannot_escape_library_root(
         library.remove("../outside")
 
     assert outside.exists()
+
+
+def test_directory_handler_has_no_background_worker_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = handler(tmp_path, monkeypatch)
+
+    assert not hasattr(library, "start")
+    assert not hasattr(library, "_thread")

@@ -2,7 +2,9 @@
 
 from typing import List, Any
 from cineflow.core.logger import log
-from cineflow.utils.misc import sort_data, fix_imdbid, sanitize_name, media_title, media_year, media_resolution
+from cineflow.utils.misc import (
+    sort_data, fix_imdbid, sanitize_name, media_title, media_year, media_resolution
+)
 from cineflow.core.bases.module import ConsumerBase
 
 
@@ -45,9 +47,11 @@ class Jackett(ConsumerBase):
             'apikey': self.cfg('token'),
         }
 
-    def get(self, query: Any = None):
+    def get(self, query: Any = None) -> List[dict] | None:
         """Collect torrents from Jackett."""
         results = self._get_results(keywords='')
+        if results is None:
+            return None
         if query:
             results = self._apply_query(results=results, query=query)
         results = self._apply_search_pref(results)
@@ -69,18 +73,25 @@ class Jackett(ConsumerBase):
 
     def _match_result(self, media: dict, titlekey: str = 'title'):
         results = self._search_w_title(media=media, titlekey=titlekey)
+        if results is None:
+            return None
         results = self._apply_search_pref(results)
         return self.match(results=results, media=media)
 
-    def _search_w_title(self, media: dict, titlekey: str = 'title'):
+    def _search_w_title(self, media: dict, titlekey: str = 'title') -> List[dict] | None:
         title = sanitize_name(name=media.get(titlekey))
         if not title or len(title) < 2:
             return []
-        if results := self._get_results(keywords=f"{title} {media.get('year')}"):
+        results = self._get_results(keywords=f"{title} {media.get('year')}")
+        if results is None:
+            return None
+        if results:
             return self._apply_size_limit(results)
         if len(title) < 3:
             title = f"{title} {media.get('year')}"
         results = self._get_results(keywords=title)
+        if results is None:
+            return None
         results = self._apply_size_limit(results)
         return results
 
@@ -104,7 +115,7 @@ class Jackett(ConsumerBase):
             return results
         return [r for r in results if r['size'] <= limit]
 
-    def _get_results(self, keywords: str = None) -> List[dict]:
+    def _get_results(self, keywords: str = None) -> List[dict] | None:
         if self.cfg('include'):
             keywords += ' ' + self.cfg('include', default='')
         response = self._handler.get(
@@ -114,8 +125,15 @@ class Jackett(ConsumerBase):
                 'Category[]': self._category,
             }
         )
-        if not response.data or not isinstance(response.data, dict):
-            return []
+        if not 200 <= response.status < 300:
+            log(f"Jackett API error {response.status}.", level="ERROR")
+            return None
+        if (
+            not isinstance(response.data, dict)
+            or not isinstance(response.data.get('Results'), list)
+        ):
+            log("Invalid response from Jackett API.", level="ERROR")
+            return None
         results = []
         sorted_items = sort_data(response.data.get('Results', []), param="Seeders", reverse=True)
         for item in sorted_items:
@@ -146,9 +164,15 @@ class Jackett(ConsumerBase):
         if size and size > 0:
             results = [r for r in results if r['size'] <= size]
         if exclude:
-            results = [r for r in results if all(e.lower() not in r['torrent'].lower() for e in query.split(' '))]
+            results = [
+                r for r in results
+                if all(e.lower() not in r['torrent'].lower() for e in query.split(' '))
+            ]
         if query:
-            results = [r for r in results if all(q.lower() in r['torrent'].lower() for q in query.split(' '))]
+            results = [
+                r for r in results
+                if all(q.lower() in r['torrent'].lower() for q in query.split(' '))
+            ]
         return results
 
     def _remove_duplicates(self, results: list) -> list:

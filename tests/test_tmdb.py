@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+import pytest
+
 from cineflow.integrations.tmdb import Tmdb
 
 
@@ -10,12 +12,13 @@ class FakeResponse:
     """Small request response stand-in."""
 
     data: dict | None
+    status: int = 200
 
 
 class FakeHandler:
     """Records TMDb requests and returns configured payloads."""
 
-    def __init__(self, responses: dict[tuple[str, int | None], dict | None]) -> None:
+    def __init__(self, responses: dict[tuple[str, int | None], object]) -> None:
         self.responses = responses
         self.calls: list[tuple[str, int | None]] = []
 
@@ -23,7 +26,8 @@ class FakeHandler:
         page = (params or {}).get("page")
         request = (endpoint, page)
         self.calls.append(request)
-        return FakeResponse(self.responses.get(request))
+        response = self.responses.get(request)
+        return response if isinstance(response, FakeResponse) else FakeResponse(response)
 
 
 def tmdb_with_handler(handler: FakeHandler, **config: object) -> Tmdb:
@@ -64,6 +68,35 @@ def test_get_stops_when_tmdb_returns_an_empty_page() -> None:
 
     assert consumer.get() == []
     assert handler.calls == [("/trending/movie/week", 1)]
+
+
+def test_get_returns_collected_items_after_successful_empty_page() -> None:
+    handler = FakeHandler({
+        ("/trending/movie/week", 1): {"results": [tmdb_item(1)]},
+        ("/trending/movie/week", 2): {"results": []},
+    })
+    consumer = tmdb_with_handler(handler, limit=100)
+
+    assert len(consumer.get()) == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [FakeResponse(None, 0), FakeResponse(None, 500), FakeResponse([]), FakeResponse({})],
+)
+def test_get_returns_none_for_failed_or_invalid_response(response: FakeResponse) -> None:
+    consumer = tmdb_with_handler(FakeHandler({("/trending/movie/week", 1): response}))
+
+    assert consumer.get() is None
+
+
+def test_get_returns_none_when_later_page_fails() -> None:
+    handler = FakeHandler({
+        ("/trending/movie/week", 1): {"results": [tmdb_item(1)]},
+        ("/trending/movie/week", 2): FakeResponse(None, 0),
+    })
+
+    assert tmdb_with_handler(handler, limit=100).get() is None
 
 
 def test_search_with_tmdb_id_returns_detail_match_without_title_search() -> None:

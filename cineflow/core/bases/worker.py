@@ -50,13 +50,16 @@ class WorkerBase(ABC):
         )
         self._thread.start()
 
-    def stop(self) -> None:
-        """Stop the consumer."""
+    def stop(self, timeout: float = 5) -> bool:
+        """Request a stop and return whether the worker thread terminated."""
         self._running = False
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=timeout)
+        if self._thread and self._thread.is_alive():
+            return False
         self._thread = None
+        return True
 
     @property
     def delay(self) -> int:

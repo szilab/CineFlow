@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 import inspect
+import time
 import yaml
 from cineflow.core.config import cfg
 from cineflow.core.bases.module import ModuleBase
@@ -32,6 +33,7 @@ class FlowManager(WorkerBase):
         self._dir = os.environ.get("CFG_DIRECTORY", "/config")
         self._flows = {}
         self._flow_hashes = {}
+        self._next_due = {}
         self._exec_mode = cfg('execution', default='parallel')
         if self._exec_mode not in ('parallel', 'sequential'):
             log(
@@ -62,18 +64,33 @@ class FlowManager(WorkerBase):
             if file not in self._flows or self._flow_hashes.get(file) != file_hash:
                 if file in self._flows:
                     log(f"Flow '{self._flows[file].name}' changed, reloading.", level="INFO")
-                    self._flows[file].stop()
+                    if not self._flows[file].stop():
+                        log(
+                            f"Flow '{self._flows[file].name}' is still stopping; "
+                            "reload deferred.", level="WARNING"
+                        )
+                        continue
                 flow = Flow(file)
                 self._flows[file] = flow
                 self._flow_hashes[file] = file_hash
-                if self._exec_mode == 'parallel' and flow._valid:
+                if self._exec_mode == 'parallel' and flow.valid and flow.enabled:
                     flow.start()
+                elif self._exec_mode == 'sequential' and flow.valid and flow.enabled:
+                    self._next_due[file] = time.monotonic()
+                else:
+                    self._next_due.pop(file, None)
 
         for key in [key for key, flow in self._flows.items() if key not in files]:
             log(f"Flow '{self._flows[key].name}' removed from the system.", level="INFO")
-            self._flows[key].stop()
+            if not self._flows[key].stop():
+                log(
+                    f"Flow '{self._flows[key].name}' is still stopping; removal deferred.",
+                    level="WARNING"
+                )
+                continue
             del self._flows[key]
             del self._flow_hashes[key]
+            self._next_due.pop(key, None)
 
     @staticmethod
     def _get_file_hash(file: str) -> str | None:
@@ -86,21 +103,37 @@ class FlowManager(WorkerBase):
 
     def run(self) -> None:
         """Run the flow manager."""
+        if self._stop_event.is_set():
+            return
         files = self._get_flow_files()
         if not files:
             log("No flow files found to run.", level="INFO")
         self._manage_flows(files)
         if self._exec_mode == 'sequential':
             log("Sequential flow execution started.", level="INFO")
-            sorted_flows = sorted(self._flows.values(), key=lambda f: f.priority)
-            for flow in sorted_flows:
+            now = time.monotonic()
+            due_flows = [
+                (file, flow) for file, flow in self._flows.items()
+                if flow.valid and flow.enabled and self._next_due.get(file, now) <= now
+            ]
+            for file, flow in sorted(due_flows, key=lambda item: item[1].priority):
+                if self._stop_event.is_set():
+                    return
                 flow.run()
+                self._next_due[file] = time.monotonic() + flow.delay * 60
 
-    def close(self) -> None:
-        """Close the flow manager."""
+    def close(self) -> bool:
+        """Stop managed flows and report whether all flow execution terminated."""
+        flows_stopped = True
         for flow in self._flows.values():
             log(f"Stopping flow '{flow.name}'.", level="INFO")
-            flow.stop()
+            if not flow.stop():
+                flows_stopped = False
+        manager_stopped = self._thread is None or self.stop()
+        if not manager_stopped or not flows_stopped:
+            log("Flow execution is still stopping; dependent resources left open.", level="WARNING")
+            return False
+        return True
 
 
 class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-instance-attributes
@@ -115,20 +148,25 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         self.steps = []
         self.priority = 99
         self.delay = 60
+        self.enabled = True
+        self._enabled_valid = True
         self._mod_cache = {}
         self._outputs = {}
         self._valid = self._validate_flow()
         if self._valid:
             log(f"Flow '{self._filename}' initialized.", level="INFO")
 
-    def run(self) -> None:
+    def run(self) -> None:  # noqa: C901
         """Run the flow."""
         super().run()
-        if not self._valid:
+        if not self._valid or not self.enabled:
             return
         self._outputs = {}
         log(f"Flow '{self.name}' from file '{self._filename}' started.", level="INFO")
         for step in self.steps:
+            if self._stop_event.is_set():
+                log(f"Flow '{self.name}' stopped before the next step.", level="INFO")
+                return
             log(f"Start step '{step.get('name')}'", level="MSG")
             outp = None
             try:
@@ -152,6 +190,11 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
             self._outputs['latest'] = outp
             log(f"Step '{step.get('name')}' executed successfully.", level="MSG")
         log(f"Flow '{self.name}' executed successfully.", level="INFO")
+
+    @property
+    def valid(self) -> bool:
+        """Return whether the parsed flow is runnable."""
+        return self._valid
 
     def _load_module(self, step: dict) -> ModuleBase | None:
         """Load a module by its name."""
@@ -249,11 +292,23 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
                     self.steps = data.get("steps", self.steps)
                     self.delay = data.get("delay", self.delay)
                     self.priority = data.get("priority", self.priority)
+                    enabled = data.get("enabled", True)
+                    if isinstance(enabled, bool):
+                        self.enabled = enabled
+                    else:
+                        self.enabled = False
+                        self._enabled_valid = False
+                        log(
+                            f"Invalid 'enabled' value in '{self._filename}': "
+                            "expected a YAML boolean.", level="WARNING"
+                        )
             except yaml.YAMLError as exc:
                 log(f"Error loading flow file '{self._filename}': {exc}", level="WARNING")
 
     def _validate_flow(self) -> bool:
         self._parse_file()
+        if not self._enabled_valid:
+            return False
         if not isinstance(self.steps, list) or not self.steps:
             log(f"Flow steps are missing or invalid in '{self._filename}'.", level="WARNING")
             return False

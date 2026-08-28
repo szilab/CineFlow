@@ -44,7 +44,7 @@ class Tmdb(ConsumerBase):
         }
         self._force_upd_fields = ['title']
 
-    def get(self, query: Any = None) -> List[dict]:
+    def get(self, query: Any = None) -> List[dict] | None:  # noqa: C901
         """Collect media from the TMDB API."""
         collected = []
         page = 1
@@ -57,9 +57,19 @@ class Tmdb(ConsumerBase):
                     'watch_region': self.cfg('region', 'US'),
                 }
             )
-            if not response.data or not isinstance(response.data, dict):
-                break
+            if not 200 <= response.status < 300:
+                log(
+                    f"TMDB API error {response.status} while collecting page {page}.",
+                    level="ERROR"
+                )
+                return None
+            if not isinstance(response.data, dict):
+                log(f"Invalid TMDB response while collecting page {page}.", level="ERROR")
+                return None
             results = response.data.get('results')
+            if not isinstance(results, list):
+                log(f"Invalid TMDB results while collecting page {page}.", level="ERROR")
+                return None
             if not results:
                 break
             for item in results:
