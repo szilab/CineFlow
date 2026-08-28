@@ -1,7 +1,7 @@
 # CineFlow
 
 [![CI/CD Pipeline](https://github.com/szilab/CineFlow/actions/workflows/ci_cd.yaml/badge.svg)](https://github.com/szilab/CineFlow/actions/workflows/ci_cd.yaml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 CineFlow is an open-source media automation system for discovering, managing, and organizing your movie collection. Inspired by [Overseerr](https://overseerr.dev) and [Jellyseerr](https://docs.jellyseerr.dev), CineFlow provides a streamlined approach to media management with support for multiple third-party integrations.
@@ -67,7 +67,7 @@ This makes CineFlow suitable for always-on automation, especially in Docker envi
 
 ## Prerequisites
 
-- Python >= 3.10 or Docker
+- Python >= 3.13 or Docker
 - TMDb API key ([Request here](https://www.themoviedb.org/settings/api))
 - Jackett instance with configured trackers
 - Jellyfin media server

@@ -16,7 +16,7 @@ docker/                 Docker runtime and example configuration
 docs/                   Project documentation
 ```
 
-Python 3.10+ is supported.
+Python 3.13+ is supported.
 
 ## Development Environment
 
