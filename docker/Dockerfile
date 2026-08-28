@@ -1,4 +1,4 @@
-FROM python:3.10-alpine3.19
+FROM python:3.13-alpine
 
 ARG PYTHON_PACKAGE=dummy
 ARG APP_VERSION=0.0.1
