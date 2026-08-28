@@ -47,6 +47,16 @@ def test_rpc_stops_after_second_409() -> None:
     client._get_session_id.assert_called_once_with()
 
 
+def test_rpc_protocol_failure_is_not_treated_as_an_empty_success() -> None:
+    """A Transmission-level failure remains distinct from an empty torrent list."""
+    client = transmission()
+    client._handler.post.return_value = response(
+        200, {'arguments': {'torrents': []}, 'result': 'invalid argument'}
+    )
+
+    assert client._rpc_request('torrent-get') is None
+
+
 def test_session_id_is_read_from_409_response_header() -> None:
     """Transmission returns valid session IDs on 409 responses."""
     client = transmission()

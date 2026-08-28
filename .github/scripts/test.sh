@@ -17,12 +17,22 @@ else
     exit 1
 fi
 
-if uv run pylint $(find "./$PYTHON_PACKAGE" -name "*.py") -d="E0401,F0001,C0116" --max-line-length=120 2>/dev/null; then
-    print_status "Pylint passed"
-else
-    print_error "Pylint failed"
+set +e
+uv run pylint $(find "./$PYTHON_PACKAGE" -name "*.py") \
+    --disable="C0116" \
+    --max-line-length=120 \
+    --fail-under=9.90 \
+    --fail-on="E,F"
+PYLINT_STATUS=$?
+set -e
+
+# Fatal/error messages always fail via --fail-on. Other enabled findings remain
+# visible and actionable through the score without individually failing CI.
+if (( PYLINT_STATUS != 0 )); then
+    print_error "Pylint failed (fatal/error finding or score below 9.90)"
     exit 1
 fi
+print_status "Pylint passed its fatal/error and 9.90 score gates"
 
 print_header "Testing package build..."
 

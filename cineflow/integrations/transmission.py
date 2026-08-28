@@ -151,9 +151,13 @@ class Transmission(ConsumerBase):
             log(f"Invalid response from Transmission API: {response.status}, {response.data}", level='WARNING')
             return None
 
+        result = response.data.get('result')
+        if result != 'success':
+            log(f"Transmission RPC '{method}' failed: {result}", level='ERROR')
+            return None
         arguments = response.data.get('arguments') or {}
         if isinstance(arguments, dict):
-            arguments['result'] = response.data.get('result')
+            arguments['result'] = result
         return arguments
 
     def _get_session_id(self) -> str:
