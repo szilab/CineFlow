@@ -6,4 +6,4 @@ if [ -z "$(ls -A $CFG_DIRECTORY)" ]; then
     cp -r $EXAMPLES_DIRECTORY/* $CFG_DIRECTORY/
 fi
 
-cineflow "$@"
+exec cineflow "$@"

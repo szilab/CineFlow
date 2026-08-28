@@ -1,0 +1,72 @@
+"""Worker base class."""
+
+import random
+from abc import ABC, abstractmethod
+from threading import Thread, Event
+
+from cineflow.core.logger import log
+
+
+class WorkerBase(ABC):
+    """Base class for workers."""
+    def __init__(self):
+        self.name = self.__class__.__name__.lower()
+        self._running = False
+        self._delay = 120
+        self._thread = None
+        self._first_run = True
+        self._stop_event = Event()
+
+    @abstractmethod
+    def run(self) -> None:
+        """Worker to do."""
+        if self._first_run:
+            self._first_run = False
+            delay = random.randint(1, min(10, self._delay))
+            self._stop_event.wait(timeout=delay)
+
+    def worker(self) -> None:
+        """Worker thread for the consumer."""
+        while self._running:
+            try:
+                self.run()
+            except Exception as exc:  # pylint: disable=broad-except
+                log(f"Worker '{self.name}' failed: {exc}", level='ERROR')
+            self._stop_event.wait(timeout=self._delay * 60)
+
+    def start(self) -> None:
+        """Start the consumer."""
+        self._running = True
+        self._stop_event.clear()
+        if self._thread and self._thread.is_alive():
+            return
+        thread_name = self.__class__.__name__.lower()
+        if hasattr(self, 'name') and isinstance(self.name, str):
+            thread_name = f"{thread_name}:{self.name}"
+        self._thread = Thread(
+            target=self.worker,
+            daemon=True,
+            name=thread_name
+        )
+        self._thread.start()
+
+    def stop(self, timeout: float = 5) -> bool:
+        """Request a stop and return whether the worker thread terminated."""
+        self._running = False
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
+        if self._thread and self._thread.is_alive():
+            return False
+        self._thread = None
+        return True
+
+    @property
+    def delay(self) -> int:
+        """Get the delay between runs, in minutes."""
+        return self._delay
+
+    @delay.setter
+    def delay(self, value: int) -> None:
+        """Set the delay between runs, in minutes."""
+        self._delay = max(value, 1)

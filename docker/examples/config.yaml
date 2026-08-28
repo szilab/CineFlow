@@ -1,13 +1,23 @@
+#execution: sequential
+tmdb:
+  quick_match: true
+  region: 'HU'
+jackett:
+  size_limit_gb: 26
+  search_preference: ["HUN", "HDR", "1080p", "2160p"]
 library:
+  directory: film
   rules:
-  - expression: missing
-    modification: grayscale
-    property: link
-  - expression: exists
-    modification: border
-    property: link
-  - case_sensitive: false
-    expression: contains
-    modification: triangle
+  # - expression: missing
+  #   modification: grayscale
+  #   property: link
+  # - expression: exists
+  #   modification: none # border
+  #   property: link
+  #   color: yellow
+  - expression: contains
     property: torrent
     value: hun
+    case_sensitive: false
+    color: red
+    modification: border

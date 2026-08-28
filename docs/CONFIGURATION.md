@@ -1,275 +1,290 @@
-# Flow Configuration Guide
+# Configuration Guide
 
-CineFlow uses a powerful flow-based automation system that allows you to create custom workflows by chaining together different modules and actions. This guide explains how to create, customize, and optimize your flows.
+CineFlow is configuration-driven. Core code provides reusable capabilities, while runtime behavior is assembled from module configuration and workflows.
 
-## Table of Contents
+The current configuration format is YAML. YAML is intended to remain the portable source-of-truth format even after the first-party GUI is introduced.
 
-- [Flow Basics](#flow-basics)
-- [Flow Structure](#flow-structure)
-- [Available Modules](#available-modules)
-- [Input/Output Chaining](#inputoutput-chaining)
-- [Configuration Overrides](#configuration-overrides)
-- [Troubleshooting](#troubleshooting)
+## Configuration Layers
 
-## Flow Basics
+CineFlow currently uses two configuration layers:
 
-### What are Flows?
+1. **Global Configuration** (`config.yaml`)
+   - system-wide module defaults and integration credentials;
+   - runtime-level settings such as execution mode.
 
-Flows are YAML configuration files that define automated workflows. Each flow consists of sequential steps that execute modules with specific actions, allowing you to create complex automation pipelines.
+2. **Workflow Configuration** (`*.yaml`, except `config.yaml`)
+   - workflow scheduling;
+   - ordered module/action steps;
+   - per-step configuration overrides;
+   - data passed between steps.
 
-### How Flows Work
+Module settings use this precedence, from lowest to highest:
 
-1. **Discovery**: CineFlow automatically finds all `.yaml` files in your config directory (except `config.yaml`)
-2. **Parsing**: Each flow file is parsed and validated
-3. **Execution**: Flows run continuously based on their defined delay interval
-4. **Chaining**: Data flows between steps, allowing complex processing pipelines
-
-### Flow File Location
-
-Place flow files in your configuration directory:
-```
-/config/
-├── config.yaml                    # Global configuration
-├── tmdb_to_jellyfin.yaml          # Flow: Discover movies
-├── jellyfin_to_transmission.yaml  # Flow: Download favorites
-└── custom_flow.yaml               # Your custom flow
+```text
+global module configuration < workflow step config < environment override
 ```
 
-## Flow Structure
+Nested dictionaries from global and step configuration are merged recursively, so a step can override one nested setting without replacing unrelated global values.
 
-### Basic Flow Anatomy
+## Configuration Directory
+
+The configuration directory is defined with:
+
+```bash
+CFG_DIRECTORY=/path/to/config
+```
+
+Typical structure:
+
+```text
+config/
+├── config.yaml
+├── from_tmdb.yaml
+├── from_lib.yaml
+└── custom_flow.yaml
+```
+
+When either supported distribution starts with an empty configuration directory,
+the bundled example configuration is copied into it automatically. Existing files
+are never overwritten.
+
+Runtime paths are controlled by the following variables:
+
+- `CINEFLOW_HOME` sets the application root for default `config`, `library`, and `media` directories.
+- `CFG_DIRECTORY` explicitly sets the configuration directory.
+- `EXPORT_DIRECTORY` explicitly sets the exported-library directory.
+- `MEDIA_DIRECTORY` optionally points to external `sample.<resolution>.mp4` files.
+
+The three explicit directory variables take precedence over `CINEFLOW_HOME`.
+Without overrides, the standalone Windows executable uses its own directory as
+the application root. Docker defines its existing `/config`, `/library`, and
+`/app/media` paths through environment variables.
+
+## Global Configuration
+
+Example:
 
 ```yaml
-name: "Flow Name"           # Display name for the flow
-delay: 30                   # Execution interval in minutes
-steps:                      # List of sequential steps
-  - name: "step_name"       # Unique step identifier
-    module: "module_name"   # Module to use (tmdb, jackett, etc.)
-    action: "action_name"   # Action to execute
-    config:                 # Optional: Override global config
-      setting: "value"
-    input: {}               # Provide input data
+execution: parallel
+
+tmdb:
+  token:
+  language: en-US
+  region: HU
+
+jackett:
+  url:
+  token:
+  categories: "2000"
+  search_preference: ["HUN", "HDR", "1080p", "2160p"]
+
+jellyfin:
+  url:
+  token:
+  ignore:
+    users: []
+
+plex:
+  url:
+  token:
+  ignore:
+    libraries: []
+
+transmission:
+  url:
+  username:
+  password:
+
+library:
+  directory: movies
+  limit: 50
+  age: 30
 ```
 
-### Required Fields
+Only configure modules that are actually used by your workflows. CineFlow does not require all integrations to be configured.
 
-- **`name`**: Flow display name
-- **`steps`**: Array of step definitions
-- **`steps[].module`**: Module name to execute
-- **`steps[].action`**: Action name within the module
+## Module Configuration
 
-### Optional Fields
+### TMDb
 
-- **`delay`**: Execution interval in seconds (default: 60)
-- **`steps[].name`**: Step identifier for referencing output
-- **`steps[].config`**: Step-specific configuration
-- **`steps[].input`**: Input data specification
-
-## Available Modules
-
-### TMDb Module (`tmdb`)
-
-Interacts with The Movie Database API.
-
-**Actions:**
-- `get(query)` - Get trending movies
-- `search(title, year)` - Search for movies
-- `enrich(data)` - Extend the received data with module properties
-
-**Example:**
-```yaml
-- name: Get trending movies
-  module: "tmdb"
-  action: "trending"
-```
-
-### Jackett Module (`jackett`)
-
-Searches torrent indexers through Jackett.
-
-**Actions:**
-- `get(query)` - Get latest entries
-- `search(title, year)` - Search for torrents
-- `enrich(data)` - Extend the received data with module properties
-
-**Example:**
-```yaml
-- name: Add torrent data
-  module: "jackett"
-  action: "enrich"
-  input: "previous"  # Movies from previous step
-```
-
-### Jellyfin Module (`jellyfin`)
-
-Manages Jellyfin media server integration.
-
-**Actions:**
-- `get(query)` - Collect media from Jellyfin can use Jellyfin API /Items endpoint parameters
-- `search(title, year)` - Search for media
-- `enrich(data)` - Extend the received data with module properties
-
-**Example:**
-```yaml
-  - name: Jellyfin favorites
-    module: jellyfin
-    action: get
-    input:
-      query:
-        parentLibrary: Request
-        isFavorite: true
-        allUsers: true
-```
-
-### Transmission Module (`transmission`)
-
-Manages downloads through Transmission.
-
-**Actions:**
-- `get(query)` - List of torrents
-- `search(title, year)` - Search for torrent
-- `put(data)` - Add list of media to download list must contain 'link' property
-
-**Example:**
-```yaml
-  - name: Add to Transmission
-    module: transmission
-    action: put
-    input: previous
-```
-
-## Input/Output Chaining
-
-### Input Types
-
-#### `none`
-No input data provided to the action this is the default if not specified.
-```yaml
-input: none
-```
-
-#### `previous`
-Use output from the immediately previous step.
-```yaml
-input: "previous"
-```
-
-#### `{{step_name}}`
-Use output from a specific named step.
-```yaml
-input: "{{get_trending}}"  # Use output from step named "get_trending"
-```
-
-#### Custom Data
-Provide custom input data structure.
-```yaml
-input:
-  query: "Inception"
-```
-
-#### Complex Input with Previous Data
-Combine custom data with previous step output. Just an example module action must support.
-```yaml
-input:
-  data: "previous"      # Previous step output goes here
-  quality: "1080p"      # Additional parameters
-  category: "movies"
-```
-
-### Output Storage
-
-Step outputs are automatically stored and can be referenced by:
-- **Step name**: `{{step_name}}`
-- **Previous step**: `previous`
-- **Latest step**: `latest` (same as previous)
-
-## Configuration Overrides
-
-### Global vs Step Configuration
-
-**Global configuration** (`config.yaml`) provides default settings for all modules:
 ```yaml
 tmdb:
-  token: "global_token"
-  lang: "en-US"
+  token: API_KEY
+  language: en-US
+  region: HU
 ```
 
-**Step configuration** overrides global settings for that specific step:
+Common settings:
+
+- `token` — required API token;
+- `language` — metadata language, default `en-US`;
+- `region` — discovery/watch region, default `US`;
+- `quick_match` — optionally allow a single search result to match without strict year comparison.
+
+### Jackett
+
 ```yaml
-- name: "French movies"
-  module: "tmdb"
-  action: "get"
-  config:
-    lang: "fr-FR"    # Override global language setting
+jackett:
+  url: http://jackett:9117
+  token: API_KEY
+  include: HUN
+  size_limit_gb: 26
+  search_preference: ["HUN", "HDR", "1080p", "2160p"]
 ```
 
-### Override Examples
+Jackett can be used directly with download clients or omitted from workflows that use future higher-level integrations such as Radarr/Sonarr.
+
+### Jellyfin
 
 ```yaml
-# Override Jackett search parameters for specific step
-- name: "Search 4k torrents for media"
-  module: "jackett"
-  action: "enrich"
-  config:
-    include: "2160p"        # Override global "1080p" setting
-  input: "previous"
+jellyfin:
+  url: http://jellyfin:8096
+  token: API_KEY
+  ignore:
+    users:
+      - username
 ```
 
-## Troubleshooting
+Jellyfin can act as a media/library state source inside workflows, including favorite-based automation.
 
-### Common Issues
+### Plex
 
-#### Flow Not Running
-**Symptoms**: Flow doesn't execute or shows no activity
-**Solutions**:
-- Check file is in correct config directory
-- Verify YAML syntax is valid
-- Ensure file has `.yaml` or `.yml` extension
-- Steps defined
-- Check logs for parsing errors
+```yaml
+plex:
+  url: http://plex:32400
+  token: PLEX_TOKEN
+  ignore:
+    libraries:
+      - Library Name
+```
 
-#### Invalid Step Definition
-**Symptoms**: Flow stops with "Invalid step definition" error
-**Solutions**:
-- Ensure all steps have `module` and `action` fields
-- Verify module names match available modules
-- Check action names exist in the specified module
+Plex is an optional alternative media-server module.
 
-#### Module Not Found
-**Symptoms**: "Module 'name' not found" error
-**Solutions**:
-- Check spelling of module name
-- Verify module is available in `cineflow/modules/`
-- Check module file has proper class definition
+### Transmission
 
-#### Action Not Found
-**Symptoms**: "Action 'name' not found" error
-**Solutions**:
-- Verify action method exists in module class
-- Check method is public (not starting with `_`)
-- Ensure method is callable
+```yaml
+transmission:
+  url: http://transmission:9091
+  username:
+  password:
+  directory:
+```
 
-#### Input Data Issues
-**Symptoms**: "No input data" or parameter errors
-**Solutions**:
-- Check previous step produces expected output
-- Verify step names for `{{step_name}}` references
-- Ensure input structure matches action expectations
+Authentication is optional when the Transmission instance does not require it.
 
-### Best Practices
+### Library
 
-1. **Start Simple**: Begin with basic flows and add complexity gradually
-2. **Use Descriptive Names**: Name flows and steps clearly for easier debugging
-3. **Test Incrementally**: Test each step individually before chaining
-4. **Monitor Resources**: Be mindful of API rate limits and system resources
-5. **Regular Cleanup**: Use cleanup flows to manage disk space and library size
-6. **Error Handling**: Flows stop on errors, so validate inputs and test thoroughly
-7. **Documentation**: Comment your flows with meaningful names and descriptions
+The internal library module creates and manages exported/dummy media entries under `EXPORT_DIRECTORY`.
 
-### Performance Optimization
+```yaml
+library:
+  directory: movies
+  limit: 50
+  age: 30
+```
 
-- **Adjust Delays**: Don't run flows more frequently than necessary
-- **Limit Results**: Use configuration to limit API results and processing
-- **Cache Effectively**: CineFlow caches module instances between runs
-- **Monitor APIs**: Respect rate limits for external services
-- **Resource Management**: Consider system resources when setting multiple flows
+- `directory` — subdirectory inside `EXPORT_DIRECTORY`;
+- `limit` — maximum retained exported items;
+- `age` — maximum age in days before cleanup.
+
+Cleanup runs synchronously when the library is read through its normal `get` action.
+
+## Poster Rules
+
+The library module can modify exported poster images according to rules.
+
+Example:
+
+```yaml
+library:
+  rules:
+    - expression: contains
+      property: torrent
+      value: HUN
+      case_sensitive: false
+      color: red
+      modification: border
+```
+
+Common fields:
+
+| Field | Description |
+|---|---|
+| `expression` | comparison such as `missing`, `exists`, or `contains` |
+| `modification` | visual operation such as `grayscale`, `border`, or `triangle` |
+| `property` | media property to evaluate |
+| `value` | optional comparison value |
+| `case_sensitive` | optional case-sensitivity flag |
+
+## Environment Overrides
+
+Module values can be overridden through environment variables generated from the module and key name.
+
+For example, a simple module setting may be overridden as:
+
+```text
+TMDB_TOKEN=...
+JACKETT_SIZE_LIMIT_GB=26
+```
+
+Current conversion rules:
+
+- booleans preserve boolean type;
+- integers preserve integer type;
+- floats preserve float type;
+- values without an existing type hint remain strings.
+
+Boolean values accept `true/false`, `1/0`, `yes/no`, and `on/off` case-insensitively.
+
+### Current limitation
+
+Environment overrides are most suitable for simple scalar values. Nested keys and list/dictionary configuration are not yet represented by a polished public environment-variable convention. Prefer YAML for complex configuration until the configuration model is formalized.
+
+## Runtime Reload Behavior
+
+`config.yaml` is read by the configuration layer when values are requested, but module instances can retain merged configuration for their lifetime. Therefore, changing global module configuration while CineFlow is running is not currently guaranteed to update already-created module instances.
+
+For predictable operation, **restart CineFlow after changing global configuration**.
+
+Workflow files themselves are monitored by the flow manager and can be reloaded when their content changes.
+
+## Validation Direction
+
+The current runtime performs validation in several places, including required module configuration and basic workflow structure. The roadmap extends this into a formal shared validation model.
+
+Planned validation metadata will allow each module to describe:
+
+- available actions;
+- configuration fields;
+- required/optional fields;
+- value types;
+- defaults;
+- user-facing descriptions;
+- secret fields;
+- action input/output expectations where practical.
+
+The same validation contract should be consumed by:
+
+- the runtime;
+- a non-destructive CLI validation command;
+- the first-party configuration GUI;
+- the visual workflow editor.
+
+This avoids maintaining separate validation rules for YAML and GUI-created configuration.
+
+## Planned GUI
+
+The GUI will be a frontend for the same YAML configuration model, not a separate configuration database.
+
+Planned capabilities include:
+
+- list available modules;
+- generate configuration forms from module metadata;
+- validate global and module settings before saving;
+- identify required and secret fields;
+- provide optional safe connectivity checks;
+- edit runtime/global settings;
+- save valid configuration back to YAML;
+- expose advanced/raw YAML editing where useful.
+
+For the workflow editor direction, see [FLOWS.md](FLOWS.md). For roadmap sequencing, see [ROADMAP.md](ROADMAP.md).

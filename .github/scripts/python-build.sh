@@ -4,15 +4,13 @@ set -e
 
 source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/utils.sh"
 
-print_header "🔧 Starting CineFlow Python Build"
-
-install_dev_deps
-install_base_deps
+print_header "Starting CineFlow Python Build"
+sync_dev_deps
 clean_build
 
-print_header "📦 Building packages..."
+print_header "Building packages..."
 
-if python -m build; then
+if uv build; then
     print_status "Build completed successfully"
     ls -la dist/
 else
@@ -20,14 +18,14 @@ else
     exit 1
 fi
 
-print_header "🔍 Checking distribution packages..."
+print_header "Checking distribution packages..."
 
-if twine check dist/*; then
+if uv run --group dev twine check dist/*; then
     print_status "Distribution packages are valid"
 else
     print_error "Distribution package check failed"
     exit 1
 fi
 
-print_status "🎉 Build completed successfully!"
+print_status "Build completed successfully!"
 clean_build

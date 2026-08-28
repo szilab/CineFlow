@@ -7,3 +7,7 @@
 *.whl
 *.pyc
 **/__pycache__
+.coverage
+coverage.xml
+htmlcov/
+.pytest-codex/

@@ -1,0 +1,85 @@
+name: Import media to library
+delay: 60  # minutes
+priority: 1
+steps:
+
+  - name: Collect from Jackett
+    module: jackett
+    action: get
+    input:
+      query:
+        include: 'HUN'
+        seeders: 40
+        resolution: '1080p'
+  - name: Extend with TMDB data
+    module: tmdb
+    action: enrich
+    input: previous
+    config:
+      must_match: true
+
+  - name: Collect from TMDB
+    module: tmdb
+    action: get
+  - name: Extend with Jackett data
+    module: jackett
+    action: enrich
+    input: previous
+    config:
+      must_match: true
+
+  - name: Merge data Jackett and TMDb data
+    module: tools
+    action: remove_duplicates
+    input: ["Extend with Jackett data","Extend with TMDB data"]
+
+  # - name: Export data
+  #   module: tools
+  #   action: data_export
+  #   input:
+  #     data: previous
+  # - name: Import data
+  #   module: tools
+  #   action: data_import
+
+  - name: Filter out Jellyfin existing media from online source
+    module: jellyfin
+    action: unique
+    input:
+      data: previous
+      query:
+        parentLibrary: "Trending Filmek"
+        allUsers: true
+        isInverse: true
+
+  - name: Exclude items by ID
+    module: tmdb
+    action: exclude
+    input:
+      data: previous
+      query:
+        imdb_ids: [295701]
+
+  - name: Export to library
+    module: library
+    action: put
+    input: previous
+
+  - name: Load library items
+    module: library
+    action: get
+
+  - name: Filter out Jellyfin existing media from library
+    module: jellyfin
+    action: common
+    input:
+      data: previous
+      query:
+        parentLibrary: "Trending Filmek"
+        allUsers: true
+        isInverse: true
+
+  - name: Library cleanup
+    module: library
+    action: remove
+    input: previous
