@@ -81,10 +81,10 @@ class Plex(ConsumerBase):
                 del query["parentLibrary"]
         return query
 
-    def _get_items(self, query: dict = None) -> List[dict] | None:
+    def _get_items(self, query: dict = None) -> List[dict] | None:  # noqa: C901
         results = []
         query = query or {}
-        
+
         # If searching by text
         if query.get("searchTerm"):
             params = {"query": query["searchTerm"]}
@@ -94,14 +94,14 @@ class Plex(ConsumerBase):
                 endpoint="/search",
                 params=params,
             )
-            if response.status >= 400:
+            if response.status == 0 or response.status >= 400:
                 log(f"Plex API error {response.status} for search: {params}", level="ERROR")
                 return None
             if not response.data or not response.data.get('MediaContainer'):
                 return []
             metadata = response.data.get('MediaContainer', {}).get('Metadata', [])
             results.extend(metadata)
-        
+
         # If querying a specific library section
         elif query.get("sectionKey"):
             params = {}
@@ -111,14 +111,14 @@ class Plex(ConsumerBase):
                 endpoint=f"/library/sections/{query['sectionKey']}/all",
                 params=params,
             )
-            if response.status >= 400:
+            if response.status == 0 or response.status >= 400:
                 log(f"Plex API error {response.status} for section {query['sectionKey']}", level="ERROR")
                 return None
             if not response.data or not response.data.get('MediaContainer'):
                 return []
             metadata = response.data.get('MediaContainer', {}).get('Metadata', [])
             results.extend(metadata)
-        
+
         # Otherwise, get all items from all libraries
         else:
             for lib_name, lib_key in self._library_list.items():
@@ -129,23 +129,26 @@ class Plex(ConsumerBase):
                     endpoint=f"/library/sections/{lib_key}/all",
                     params=params,
                 )
-                if response.status >= 400:
+                if response.status == 0 or response.status >= 400:
                     log(f"Plex API error {response.status} for library '{lib_name}'", level="ERROR")
-                    continue
+                    return None
                 if not response.data or not response.data.get('MediaContainer'):
                     continue
                 metadata = response.data.get('MediaContainer', {}).get('Metadata', [])
                 results.extend(metadata)
-        
+
         return [self.map(item=item) for item in results]
 
-    def _inverse_items(self, query_items: List[dict]) -> List[dict]:
+    def _inverse_items(self, query_items: List[dict]) -> List[dict] | None:
         if not query_items:
             log(
                 "Query items are empty, skipping inverse calculation "
                 "to prevent library wipeout.", level="WARNING")
             return []
-        all_items = self._get_items(query={}) or []
+        all_items = self._get_items(query={})
+        if all_items is None:
+            log("Failed to query the Plex library for inverse calculation.", level="ERROR")
+            return None
         exclude_ids = set()
         for item in query_items:
             for key in ['plexid', 'tmdbid', 'imdbid']:
@@ -166,13 +169,15 @@ class Plex(ConsumerBase):
         response = self._handler.get(
             endpoint="/library/sections",
         )
+        if response.status == 0 or response.status >= 400:
+            raise ValueError(f"Failed to query Plex libraries: HTTP {response.status}")
         if not response.data or not response.data.get('MediaContainer'):
             raise ValueError("No libraries found in Plex, skip the rest.")
-        
+
         directories = response.data.get('MediaContainer', {}).get('Directory', [])
         if not directories:
             raise ValueError("No libraries found in Plex, skip the rest.")
-        
+
         library_list = {}
         for library in directories:
             if library.get("title") in self.cfg('ignore.libraries', []):
@@ -187,7 +192,7 @@ class Plex(ConsumerBase):
         """Extract provider ID from Plex Guid array."""
         if not guid_list or not isinstance(guid_list, list):
             return None
-        
+
         for guid_obj in guid_list:
             if not isinstance(guid_obj, dict):
                 continue

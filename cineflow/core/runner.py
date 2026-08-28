@@ -1,7 +1,9 @@
 """Flow Runner"""
 
 import copy
+import hashlib
 import os
+from pathlib import Path
 from typing import Any
 import inspect
 import yaml
@@ -19,17 +21,24 @@ class FlowManager(WorkerBase):
         """Initialize the task runner."""
         super().__init__()
         try:
-            self._delay = int(os.environ.get("FM_RERESH_SEQ", 60))
+            self._delay = int(os.environ.get("FM_REFRESH_SEQ", os.environ.get("FM_RERESH_SEQ", 60)))
         except ValueError:
             log(
                 "Invalid refresh sequence value in "
-                "'FM_RERESH_SEQ', using default 60s.",
+                "'FM_REFRESH_SEQ' or legacy 'FM_RERESH_SEQ', using default 60 minutes.",
                 level="WARNING"
             )
             self._delay = 60
         self._dir = os.environ.get("CFG_DIRECTORY", "/config")
         self._flows = {}
+        self._flow_hashes = {}
         self._exec_mode = cfg('execution', default='parallel')
+        if self._exec_mode not in ('parallel', 'sequential'):
+            log(
+                f"Invalid execution mode '{self._exec_mode}', falling back to parallel.",
+                level="WARNING"
+            )
+            self._exec_mode = 'parallel'
         if os.path.exists(self._dir):
             self.start()
 
@@ -48,26 +57,38 @@ class FlowManager(WorkerBase):
 
     def _manage_flows(self, files: list) -> None:
         """Add new flows and remove old ones."""
-        # Add new flows
         for file in files:
-            if file not in self._flows:
+            file_hash = self._get_file_hash(file)
+            if file not in self._flows or self._flow_hashes.get(file) != file_hash:
+                if file in self._flows:
+                    log(f"Flow '{self._flows[file].name}' changed, reloading.", level="INFO")
+                    self._flows[file].stop()
                 flow = Flow(file)
                 self._flows[file] = flow
-                if self._exec_mode == 'parallel':
+                self._flow_hashes[file] = file_hash
+                if self._exec_mode == 'parallel' and flow._valid:
                     flow.start()
 
-        # Remove deleted flows
         for key in [key for key, flow in self._flows.items() if key not in files]:
             log(f"Flow '{self._flows[key].name}' removed from the system.", level="INFO")
             self._flows[key].stop()
             del self._flows[key]
+            del self._flow_hashes[key]
+
+    @staticmethod
+    def _get_file_hash(file: str) -> str | None:
+        """Return a content hash for a flow file."""
+        try:
+            return hashlib.sha256(Path(file).read_bytes()).hexdigest()
+        except OSError as exc:
+            log(f"Unable to read flow file '{file}': {exc}", level="WARNING")
+            return None
 
     def run(self) -> None:
         """Run the flow manager."""
         files = self._get_flow_files()
         if not files:
             log("No flow files found to run.", level="INFO")
-            return
         self._manage_flows(files)
         if self._exec_mode == 'sequential':
             log("Sequential flow execution started.", level="INFO")
@@ -118,7 +139,7 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
                 if not (inp := self._load_input(step=step)):
                     log(f"No input data for step '{step.get('name')}'.")
                 outp = self._call_action(action=action, inp=inp)
-            except (ValueError, TypeError) as exc:
+            except Exception as exc:
                 log(f"Stop flow, error calling action '{step.get('name')}' -> {exc}", level="ERROR")
                 return
             if outp is None and step.get("action") == "get":

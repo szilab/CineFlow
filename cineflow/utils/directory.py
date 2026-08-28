@@ -9,7 +9,7 @@ from threading import Lock
 from pathlib import Path
 from cineflow.utils.image import ImageHandler
 from cineflow.core.logger import log
-from cineflow.utils.misc import sanitize_path, media_resolution
+from cineflow.utils.misc import sanitize_path
 from cineflow.core.bases.worker import WorkerBase
 
 
@@ -27,7 +27,8 @@ class DirectoryHandler(WorkerBase):
         self._lock = Lock()
         if not directory:
             raise ValueError("Directory name must be provided.")
-        self._path = Path(os.environ.get("EXPORT_DIRECTORY", "/library")).resolve() / directory
+        self._root = Path(os.environ.get("EXPORT_DIRECTORY", "/library")).resolve()
+        self._path = self._resolve_library_path(directory)
         if self._path.exists() and not self._path.is_dir():
             raise ValueError(f"Directory path '{self._path}' exists but is not a directory.")
         try:
@@ -39,33 +40,33 @@ class DirectoryHandler(WorkerBase):
 
     def all(self) -> list:
         """Get the list of items in directory."""
-        try:
-            directories = []
-            for d in self._path.iterdir():
-                if d.is_dir():
-                    directories.append(d)
-            return directories
-        except OSError as e:
-            log(f"Error listing items: {e}", level='WARNING')
+        with self._lock:
+            try:
+                return [directory for directory in self._path.iterdir() if directory.is_dir()]
+            except OSError as e:
+                log(f"Error listing items: {e}", level='WARNING')
         return []
 
     def make(self, item: str, image: ImageHandler = None, resolution: str = None) -> bool:
         """Make an item and file."""
-        item = sanitize_path(item)
+        item_path = self._item_path(item)
+        item = item_path.name
         file = re.split(r'[\(\[]', item, maxsplit=1)[0].strip() + '.mkv'
         with self._lock:
             try:
-                if not Path.exists(self._path / item):
-                    os.makedirs(self._path / item, exist_ok=True)
+                if not item_path.exists():
+                    os.makedirs(item_path, exist_ok=True)
                     log(f"Item '{item}' created successfully.")
                 media_dir = self._media_directory()
-                if media_dir and self._copy_sample(file_path=self._path / item / file, media_dir=media_dir, resolution=resolution):
+                if media_dir and self._copy_sample(
+                    file_path=item_path / file, media_dir=media_dir, resolution=resolution
+                ):
                     log(f"Media file for item '{item}' created from sample ({resolution or 'default'}).")
                 else:
-                    Path(self._path / item / file).touch(exist_ok=True)
+                    Path(item_path / file).touch(exist_ok=True)
                     log(f"Media file for item '{item}' created as placeholder.")
                 if image:
-                    image.save(str(self._path / item))
+                    image.save(str(item_path))
                     log(f"Image for item '{item}' saved successfully.")
                 return True
             except (OSError, ValueError) as e:
@@ -74,10 +75,10 @@ class DirectoryHandler(WorkerBase):
 
     def exists(self, item: str) -> bool:
         """Check if item exists."""
-        item = sanitize_path(item)
+        item_path = self._item_path(item)
         with self._lock:
             try:
-                if Path.exists(self._path / item):
+                if item_path.exists():
                     return True
             except (OSError, ValueError) as e:
                 log(f"Failed to check existence: {e}", level='WARNING')
@@ -85,12 +86,12 @@ class DirectoryHandler(WorkerBase):
 
     def export(self, item: str, media: dict) -> bool:
         """Export data to directory."""
-        item = sanitize_path(item)
+        item_path = self._item_path(item)
         with self._lock:
             try:
-                if not Path.exists(self._path / item):
+                if not item_path.exists():
                     log(f"Failed to export data: {item} missing", level='WARNING')
-                with open(self._path / item / 'data.json', 'w', encoding='utf-8') as f:
+                with open(item_path / 'data.json', 'w', encoding='utf-8') as f:
                     json.dump(media, f, indent=4)
                 log(f"Data for item '{item}' exported successfully.")
                 return True
@@ -100,12 +101,12 @@ class DirectoryHandler(WorkerBase):
 
     def imprt(self, item: str) -> dict:
         """Import data from directory."""
-        item = sanitize_path(item)
+        item_path = self._item_path(item)
         with self._lock:
             try:
-                if not Path.exists(self._path / item):
+                if not item_path.exists():
                     log(f"Failed to import data: {item} missing", level='WARNING')
-                with open(self._path / item / 'data.json', 'r', encoding='utf-8') as f:
+                with open(item_path / 'data.json', 'r', encoding='utf-8') as f:
                     media = json.load(f)
                 log(f"Data for item '{item}' imported successfully.")
                 return media
@@ -115,13 +116,10 @@ class DirectoryHandler(WorkerBase):
 
     def remove(self, item: str) -> bool:
         """Remove an item."""
-        item = str(item)
-        if item.startswith(str(self._path)):
-            item = item.replace(str(self._path), "")
-        item = sanitize_path(item)
+        item_path = self._item_path(item)
         with self._lock:
             try:
-                shutil.rmtree(os.path.join(self._path, item))
+                shutil.rmtree(item_path)
                 log(f"Item '{item}' removed successfully from library.", level='MSG')
                 return True
             except OSError as e:
@@ -131,29 +129,51 @@ class DirectoryHandler(WorkerBase):
     def run(self):
         """Run method for WorkerBase to run libraray cleanup periodicly."""
         log(f"Start library cleanup for path '{self._path}'")
-        with self._lock:
-            dir_list = self.all()
-            # Sort by creation time, newest first
-            dir_list.sort(key=lambda x: Path(x).stat().st_ctime, reverse=True)
-            i = 1
-            for item in dir_list:
-                try:
-                    # Remove the item if it exceeds the maximum count for the directory
-                    if i > self.max_item_count:
-                        log(f"Found excess item: {item}")
-                        self.remove(item)
-                        continue
-                    # Check if the item is older than the maximum age
-                    file_age = time.time() - Path(self._path / item).stat().st_ctime
-                    if file_age > self.max_item_age * 24 * 60 * 60:
-                        log(f"Found old item: {item}")
-                        self.remove(item)
-                        continue
-                    i += 1
-                except OSError as e:
-                    log(f"Failed to clean item '{item}': {e}", level='WARNING')
+        dir_list = self.all()
+        # Sort by creation time, newest first
+        dir_list.sort(key=lambda x: x.stat().st_ctime, reverse=True)
+        i = 1
+        for item in dir_list:
+            try:
+                if i > self.max_item_count:
+                    log(f"Found excess item: {item}")
+                    self.remove(item)
                     continue
+                file_age = time.time() - item.stat().st_ctime
+                if file_age > self.max_item_age * 24 * 60 * 60:
+                    log(f"Found old item: {item}")
+                    self.remove(item)
+                    continue
+                i += 1
+            except OSError as e:
+                log(f"Failed to clean item '{item}': {e}", level='WARNING')
+                continue
         log(f"End library cleanup for path '{self._path}'")
+
+    def _resolve_library_path(self, directory: str) -> Path:
+        """Resolve a configured library path within the export root."""
+        path = Path(directory)
+        target = path.resolve() if path.is_absolute() else (self._root / path).resolve()
+        try:
+            target.relative_to(self._root)
+        except ValueError as exc:
+            raise ValueError("Directory must be inside EXPORT_DIRECTORY.") from exc
+        return target
+
+    def _item_path(self, item: str | Path) -> Path:
+        """Resolve an item path without permitting escape from the library."""
+        raw_path = Path(item)
+        candidate = raw_path.resolve() if raw_path.is_absolute() else (self._path / raw_path).resolve()
+        try:
+            relative = candidate.relative_to(self._path)
+        except ValueError as exc:
+            raise ValueError("Item path must be inside the configured library.") from exc
+        target = (self._path / sanitize_path(str(relative))).resolve()
+        try:
+            target.relative_to(self._path)
+        except ValueError as exc:
+            raise ValueError("Item path must be inside the configured library.") from exc
+        return target
 
     def _media_directory(self) -> Path | None:
         """Get the media sample directory path."""
@@ -165,7 +185,7 @@ class DirectoryHandler(WorkerBase):
                 return media_path
             log(f"Media directory '{media_path}' exists but no sample files found.", level='DEBUG')
         else:
-            log(f"Media directory '{media_path}' not found.", level='DEBUG')        
+            log(f"Media directory '{media_path}' not found.", level='DEBUG')
         return None
 
     def _copy_sample(self, file_path: Path, media_dir: Path, resolution: str = None) -> bool:
@@ -176,7 +196,7 @@ class DirectoryHandler(WorkerBase):
             return True
         log(f"No exact sample match for resolution '{resolution}'.", level='DEBUG')
         return False
-    
+
     @property
     def max_item_age(self) -> int:
         return self._max_item_age

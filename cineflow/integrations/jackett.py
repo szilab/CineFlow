@@ -67,7 +67,7 @@ class Jackett(ConsumerBase):
                 return match
         return None
 
-    def _match_result(self, media: dict, titlekey: dict = 'title'):
+    def _match_result(self, media: dict, titlekey: str = 'title'):
         results = self._search_w_title(media=media, titlekey=titlekey)
         results = self._apply_search_pref(results)
         return self.match(results=results, media=media)
@@ -75,7 +75,7 @@ class Jackett(ConsumerBase):
     def _search_w_title(self, media: dict, titlekey: str = 'title'):
         title = sanitize_name(name=media.get(titlekey))
         if not title or len(title) < 2:
-            return None
+            return []
         if results := self._get_results(keywords=f"{title} {media.get('year')}"):
             return self._apply_size_limit(results)
         if len(title) < 3:
@@ -84,7 +84,7 @@ class Jackett(ConsumerBase):
         results = self._apply_size_limit(results)
         return results
 
-    def _apply_search_pref(self, results: list):
+    def _apply_search_pref(self, results: list) -> list:
         query_pref = list(self.cfg('search_preference', default=[]))
         query_pref.append('')
         scored_res = [{'s': None, 'r': r} for r in results]
@@ -98,7 +98,7 @@ class Jackett(ConsumerBase):
         filtered = [r['r'] for r in scored_res]
         return filtered
 
-    def _apply_size_limit(self, results: list):
+    def _apply_size_limit(self, results: list) -> list:
         limit = int(self.cfg('size_limit_gb', default=0))
         if not limit:
             return results
@@ -151,7 +151,7 @@ class Jackett(ConsumerBase):
             results = [r for r in results if all(q.lower() in r['torrent'].lower() for q in query.split(' '))]
         return results
 
-    def _remove_duplicates(self, results: list):
+    def _remove_duplicates(self, results: list) -> list:
         filtered = []
         seen_titles = set()
         for item in results:

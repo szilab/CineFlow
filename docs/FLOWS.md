@@ -54,7 +54,7 @@ A flow is defined in YAML format.
 ```yaml
 name: trending-to-transmission
 enabled: true
-delay: 3600   # seconds
+delay: 60   # minutes
 
 modules:
   - name: tmdb_trending
@@ -77,7 +77,7 @@ modules:
 |------------|---------|----------------------------------------|
 | `name`	 | string  | Unique flow identifier                 |
 | `enabled`	 | boolean | Whether flow runs                      |
-| `delay`	 | integer | Delay in seconds between executions    |
+| `delay`	 | integer | Delay in minutes between executions    |
 | `modules`	 | list	   | Ordered list of module definitions     |
 
 ## 6. Module Definition
@@ -127,7 +127,7 @@ Purpose:
 ```yaml
 name: trending-automation
 enabled: true
-delay: 7200
+delay: 120  # minutes
 
 modules:
   - name: tmdb_trending
@@ -146,7 +146,7 @@ Purpose:
 ```yaml
 name: favorites-download
 enabled: true
-delay: 1800
+delay: 30  # minutes
 
 modules:
   - name: jellyfin_favorites
@@ -186,7 +186,7 @@ Disabled flows:
 Each flow manages its own interval:
 ```
 execute()
-sleep(delay)
+sleep(delay * 60)
 repeat()
 ```
 
@@ -208,7 +208,7 @@ CineFlow flow system is designed to be:
 * Keep flows small and focused
 * Separate trending and download flows
 * Use meaningful names
-* Avoid very small delays (< 300s)
+* Avoid very small delays (< 5 minutes)
 * Ensure modules are stateless where possible
 * Validate configuration before deployment
 

@@ -114,16 +114,45 @@ When running via Docker:
 * If the configuration directory is empty, **default example flows are copied automatically**
 * These flows provide a ready-to-use automation setup
 
-### Local / CLI Installation
+### Local development (Windows)
 
-Download the latest wheel from GitHub Releases and run:
+Install [uv](https://docs.astral.sh/uv/) once:
 
-```bash
-pip install cineflow-*.whl
-export CFG_DIRECTORY="/path/to/your/config"
-export EXPORT_DIRECTORY="/path/to/your/library"
-cineflow
+```powershell
+winget install --id=astral-sh.uv -e
 ```
+
+Clone the project and create the managed development environment. No virtual
+environment activation is needed:
+
+```powershell
+git clone https://github.com/szilab/CineFlow.git
+cd CineFlow
+uv sync
+```
+
+Run CineFlow:
+
+```powershell
+uv run cineflow
+# Or: uv run python -m cineflow.main
+```
+
+For development, use the tools through uv:
+
+```powershell
+uv run pytest
+uv run pytest --cov=cineflow --cov-report=term-missing
+uv run flake8 .
+uv run pylint cineflow
+uv build
+```
+
+CI enforces a minimum line coverage of 75%. For a local HTML report, run
+`uv run pytest --cov=cineflow --cov-report=html`.
+
+To install a release wheel outside a development checkout, use `uv tool install`
+or `uv pip install` in the environment where CineFlow will run.
 
 ## Configuration
 

@@ -115,7 +115,7 @@ class Jellyfin(ConsumerBase):
                 endpoint=f"/Users/{u}/Items" if u else "/Items",
                 params=params,
             )
-            if response.status >= 400:
+            if response.status == 0 or response.status >= 400:
                 log(f"Jellyfin API error {response.status} for query: {params}", level="ERROR")
                 return None
             if not response.data or not response.data.get('Items'):
@@ -123,13 +123,16 @@ class Jellyfin(ConsumerBase):
             results.extend(response.data.get('Items'))
         return [self.map(item=item) for item in results]
 
-    def _inverse_items(self, query_items: List[dict]) -> List[dict]:
+    def _inverse_items(self, query_items: List[dict]) -> List[dict] | None:
         if not query_items:
             log(
                 "Query items are empty, skipping inverse calculation "
                 "to prevent library wipeout.", level="WARNING")
             return []
-        all_items = self._get_items(query={}) or []
+        all_items = self._get_items(query={})
+        if all_items is None:
+            log("Failed to query the Jellyfin library for inverse calculation.", level="ERROR")
+            return None
         exclude_ids = set()
         for item in query_items:
             for key in ['jellyfinid', 'tmdbid', 'imdbid']:
@@ -150,8 +153,10 @@ class Jellyfin(ConsumerBase):
         response = self._handler.get(
             endpoint="/Users",
         )
+        if response.status == 0 or response.status >= 400:
+            raise ValueError(f"Failed to query Jellyfin users: HTTP {response.status}")
         if not response.data or len(response.data) == 0:
-            raise ValueError("No users found in Jellyfin, skipp the rest.")
+            raise ValueError("No users found in Jellyfin")
         user_list = {}
         for user in response.data:
             if user.get("Name") in self.cfg('ignore.users', []):
@@ -166,8 +171,10 @@ class Jellyfin(ConsumerBase):
         response = self._handler.get(
             endpoint="/Library/VirtualFolders",
         )
+        if response.status == 0 or response.status >= 400:
+            raise ValueError(f"Failed to query Jellyfin libraries: HTTP {response.status}")
         if not response.data or len(response.data) == 0:
-            raise ValueError("No libraries found in Jellyfin, skipp the rest.")
+            raise ValueError("No libraries found in Jellyfin")
         library_list = {}
         for library in response.data:
             library_list.update({

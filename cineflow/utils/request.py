@@ -4,7 +4,7 @@
 import os
 import time
 import hashlib
-from typing import Optional
+from typing import Any, Optional
 from dataclasses import dataclass
 from json import JSONDecodeError
 import requests
@@ -15,7 +15,7 @@ from cineflow.core.database import Database as Db
 @dataclass
 class RequestResponse:
     """Dataclass to store the response of a request."""
-    data: dict
+    data: Any
     status: int
     cookies: dict
     headers: dict
@@ -55,7 +55,8 @@ class RequestHandler:
         kwargs['params'] = {**self._params, **kwargs.get("params", {})}
         kwargs['headers'] = {**self._headers, **kwargs.get("headers", {})}
         # return cached response if available
-        if cached := self._cache_handler.read(method, full_url, **kwargs):
+        cached = self._cache_handler.read(method, full_url, **kwargs)
+        if cached is not None:
             return RequestResponse(data=cached, status=200, cookies={}, headers={})
         # respect API rate limits
         self._rate_limiter.wait()
@@ -76,8 +77,12 @@ class RequestHandler:
             log(f"Unexpected status code {response.status_code} for '{full_url}'", level='WARNING')
             return RequestResponse(data=None, status=response.status_code, cookies={}, headers={})
         if not response.content:
-            log(f"No response received for '{full_url}'", level='WARNING')
-            return RequestResponse(data=None, status=0, cookies={}, headers={})
+            return RequestResponse(
+                data=None,
+                status=response.status_code,
+                cookies=response.cookies.get_dict(),
+                headers=response.headers,
+            )
         # try to parse the response as JSON
         try:
             data = response.json()
@@ -133,17 +138,17 @@ class RequestHandler:
         self._cache_handler.cache_time = max(value, 0)
 
     @property
-    def ok_statuses(self) -> set:
+    def ok_statuses(self) -> set[int] | None:
         return self._ok_statuses
 
     @ok_statuses.setter
-    def ok_statuses(self, value: set) -> None:
-        if not value:
+    def ok_statuses(self, value: set[int] | None) -> None:
+        if value is None:
             self._ok_statuses = None
+            return
         if not isinstance(value, set):
-            self._ok_statuses = {200, 201, 202, 204}
-        else:
-            self._ok_statuses = value
+            raise TypeError("ok_statuses must be a set of status codes or None")
+        self._ok_statuses = value
 
 
 class CacheHandler:
@@ -157,14 +162,14 @@ class CacheHandler:
         key = f"{method}:{url}:{kwargs}"
         return hashlib.md5(key.encode()).hexdigest()
 
-    def read(self, method: str, url: str, **kwargs) -> Optional[dict]:
+    def read(self, method: str, url: str, **kwargs) -> Any | None:
         """Read cached response from the database."""
         if self.cache_time <= 0:
             return None
         rhash = self._hash(method, url, kwargs)
         return self._db.get_request(rhash=rhash, expire=self.cache_time)
 
-    def write(self, method: str, url: str, resp_data: dict, **kwargs) -> None:
+    def write(self, method: str, url: str, resp_data: Any, **kwargs) -> None:
         """Write response to the cache."""
         if self.cache_time <= 0:
             return

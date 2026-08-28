@@ -128,19 +128,21 @@ class Transmission(ConsumerBase):
 
     def _rpc_request(self, method: str, params: dict = None) -> dict:
         """Make a request to the Transmission RPC API."""
-        response = self._handler.post(
-            endpoint=self.cfg('rpc_path', default='transmission/rpc'),
-            data=None,
-            json={'method': method, 'arguments': params or {}},
-            headers={
-                'X-Transmission-Session-Id': self._session_id
-            },
-            auth=self._auth
-        )
-        # Handle session ID refresh if needed
-        if response.status == 409:
-            self._session_id = self._get_session_id()
-            return self._rpc_request(method=method, params=params)
+        for attempt in range(2):
+            response = self._handler.post(
+                endpoint=self.cfg('rpc_path', default='transmission/rpc'),
+                data=None,
+                json={'method': method, 'arguments': params or {}},
+                headers={'X-Transmission-Session-Id': self._session_id},
+                auth=self._auth
+            )
+            if response.status != 409:
+                break
+            if attempt == 0:
+                self._session_id = self._get_session_id()
+                continue
+            log("Transmission session refresh failed after one RPC retry.", level='ERROR')
+            return {}
         if not response.data or not isinstance(response.data, dict):
             log(f"Invalid response from Transmission API: {response.status}, {response.data}", level='WARNING')
             return {}

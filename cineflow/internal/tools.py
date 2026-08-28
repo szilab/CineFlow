@@ -44,7 +44,7 @@ class Tools():  # pylint: disable=too-few-public-methods
                 log(f"Item '{item.get('title')}' ({item.get('year')}) [{item.get('imdbid')}] is a duplicate.")
                 filtered.remove(item)
             else:
-                imdbids.append(item['imdbid'])
+                imdbids.append(item.get('imdbid'))
 
         tmdbids = []
         for item in filtered:
@@ -52,7 +52,7 @@ class Tools():  # pylint: disable=too-few-public-methods
                 log(f"Item '{item.get('title')}' ({item.get('year')}) [{item.get('tmdbid')}] is a duplicate.")
                 filtered.remove(item)
             else:
-                tmdbids.append(item['tmdbid'])
+                tmdbids.append(item.get('tmdbid'))
 
         name_years = []
         for item in filtered:

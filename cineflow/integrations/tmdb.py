@@ -48,7 +48,7 @@ class Tmdb(ConsumerBase):
         """Collect media from the TMDB API."""
         collected = []
         page = 1
-        while len(collected) < self.limit or page > 20:
+        while len(collected) < self.limit and page <= 20:
             response = self._handler.get(
                 endpoint=f"/trending/{self.kind}/week",
                 params={
@@ -59,7 +59,10 @@ class Tmdb(ConsumerBase):
             )
             if not response.data or not isinstance(response.data, dict):
                 break
-            for item in response.data.get('results', []):
+            results = response.data.get('results')
+            if not results:
+                break
+            for item in results:
                 if media := self.map(item=item):
                     if media and query and query in media.get('title'):
                         collected.append(media)
@@ -80,7 +83,9 @@ class Tmdb(ConsumerBase):
                 return match
         return None
 
-    def _match_w_result(self, media: str, titlekey: str = 'title', tmdbid: str = None):
+    def _match_w_result(
+        self, media: dict, titlekey: str = 'title', tmdbid: str = None
+    ) -> dict:
         if tmdbid:
             results = self._search_w_tmdbid(tmdbid=tmdbid)
             if match := self.match(results=results, media=media):
@@ -93,10 +98,10 @@ class Tmdb(ConsumerBase):
         response = self._handler.get(
                 endpoint=f"/{self.kind}/{tmdbid}",
                 params={'append_to_response': 'images,external_ids'}
-            )
+        )
         if response.data and response.data.get('id'):
-            return self.map(item=response.data)
-        return None
+            return [self.map(item=response.data)]
+        return []
 
     def _search_w_title(self, media: dict, titlekey: str) -> list[dict]:
         """Search for media in TMDB."""

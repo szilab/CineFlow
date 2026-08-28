@@ -141,9 +141,13 @@ class ConsumerBase(ModuleBase, ABC):
             return True
         return False
 
-    def _match_w_title(self, item: dict, media: dict, titlekey: str = 'tmdbid', quick_match: bool = False):
+    def _match_w_title(
+        self, item: dict, media: dict, titlekey: str = 'title', quick_match: bool = False
+    ) -> bool:
         """Match item from the results"""
         title = sanitize_name(name=media.get(titlekey)).lower()
+        if not title:
+            return False
         it = sanitize_name(name=item.get('title')).lower()
         ia = sanitize_name(name=item.get('alttitle')).lower()
         iy = str(item.get('year'))
@@ -196,7 +200,7 @@ class ConsumerBase(ModuleBase, ABC):
         results = self.get(query=query)
         if not results:
             log("No results returned by the query, nothing to operate on.")
-            return data
+            return [] if operation == 'common' else data
         to_return = []
         for d in data:
             match = False
@@ -231,7 +235,7 @@ class ConsumerBase(ModuleBase, ABC):
 
     @kind.setter
     def kind(self, value: str) -> None:
-        if not value and value not in ['movie', 'tv']:
+        if value not in ['movie', 'tv']:
             raise ValueError("Kind must be either 'movie' or 'tv'.")
         self._kind = value
 

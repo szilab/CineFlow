@@ -55,10 +55,10 @@ class WorkerBase(ABC):
 
     @property
     def delay(self) -> int:
-        """Get the delay between runs."""
+        """Get the delay between runs, in minutes."""
         return self._delay
 
     @delay.setter
     def delay(self, value: int) -> None:
-        """Set the delay between runs."""
+        """Set the delay between runs, in minutes."""
         self._delay = max(value, 1)

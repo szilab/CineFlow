@@ -25,6 +25,7 @@ This project adheres to a code of conduct. By participating, you are expected to
 
 - **Python 3.10+** - Required for development
 - **Git** - Version control
+- **uv** - Python package and environment manager
 - **Docker** (optional) - For containerized development and testing
 - **Your favorite IDE** - VS Code, PyCharm, etc.
 
@@ -44,25 +45,19 @@ This project adheres to a code of conduct. By participating, you are expected to
 
 ## Development Setup
 
-### 1. Create Virtual Environment
+### 1. Install uv (Windows)
 
-```bash
-# Create virtual environment
-python -m venv .cflow
-
-# Activate it (Linux/Mac)
-source .cflow/bin/activate
-
-# Activate it (Windows)
-.cflow\Scripts\activate
+```powershell
+winget install --id=astral-sh.uv -e
 ```
 
-### 2. Install Development Dependencies
+### 2. Sync Development Dependencies
 
-```bash
-# Install the package in editable mode with all dependencies
-pip install -e .
+```powershell
+uv sync
 ```
+
+uv manages the project's `.venv`; do not activate it manually for normal development.
 
 ### 4. Set Up Configuration
 
@@ -119,12 +114,14 @@ EOF
    - Update documentation if needed
 
 4. **Test your changes**:
-   ```bash
+   ```powershell
    # Run tests
-   python -m pytest
+   uv run pytest
 
    # Test CLI functionality
-   CFG_DIRECTORY=test-config LOG_LEVEL=DEBUG cineflow
+   $env:CFG_DIRECTORY = "test-config"
+   $env:LOG_LEVEL = "DEBUG"
+   uv run cineflow
    ```
 
 5. **Commit your changes**:
@@ -158,7 +155,15 @@ EOF
 
 ### Running Tests
 
-Run provided script: `.github/scripts/test.sh`
+```powershell
+uv run pytest
+uv run pytest --cov=cineflow --cov-report=term-missing
+uv run flake8 .
+uv run pylint cineflow
+```
+
+CI requires at least 75% line coverage. To inspect coverage locally in a browser,
+run `uv run pytest --cov=cineflow --cov-report=html`.
 
 ### Writing Tests
 
@@ -187,7 +192,9 @@ def test_tmdb_search():
 
 ### Build Python Package
 
-Run the provided script: `.github/scripts/python-build.sh`
+```powershell
+uv build
+```
 
 ### Build Docker Image
 
@@ -243,7 +250,7 @@ Use the bug report template and include:
 
 ### Common Issues
 
-- **Import errors**: Make sure you installed with `pip install -e .`
+- **Import errors**: Run `uv sync` to create or update the development environment.
 - **Config not found**: Set `CFG_DIRECTORY` environment variable
 - **API timeouts**: Check network connectivity and API credentials
 
