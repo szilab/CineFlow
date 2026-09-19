@@ -30,15 +30,37 @@ fi
 
 print_info "Local docker image '$PYTHON_PACKAGE:local-$VERSION' built successfully!"
 
+push_with_retry() {
+    local image="$1"
+    local max_attempts=3
+    local retry_delay=5
+    local attempt=1
+
+    while true; do
+        if docker push "$image"; then
+            return 0
+        fi
+
+        if [ "$attempt" -ge "$max_attempts" ]; then
+            print_error "Docker push failed for '$image' after $max_attempts attempts."
+            return 1
+        fi
+
+        print_warning "Docker push failed for '$image' (attempt $attempt/$max_attempts). Retrying in ${retry_delay}s..."
+        attempt=$((attempt + 1))
+        sleep "$retry_delay"
+    done
+}
+
 if [ -n "$GITHUB_ACTIONS" ]; then
     REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
     if [ "$GITHUB_REF" = "refs/heads/master" ] || [ "$GITHUB_REF" = "refs/heads/main" ]; then
         docker tag $PYTHON_PACKAGE:local-$VERSION $REGISTRY/$PYTHON_PACKAGE:$VERSION
-        docker push $REGISTRY/$PYTHON_PACKAGE:$VERSION
+        push_with_retry $REGISTRY/$PYTHON_PACKAGE:$VERSION
         print_info "Docker image tagged and pushed to '$REGISTRY/$PYTHON_PACKAGE:$VERSION'"
     elif [ "$GITHUB_REF" = "refs/heads/develop" ]; then
         docker tag $PYTHON_PACKAGE:local-$VERSION $REGISTRY/$PYTHON_PACKAGE:dev-$VERSION
-        docker push $REGISTRY/$PYTHON_PACKAGE:dev-$VERSION
+        push_with_retry $REGISTRY/$PYTHON_PACKAGE:dev-$VERSION
         print_info "Docker image tagged and pushed to '$REGISTRY/$PYTHON_PACKAGE:dev-$VERSION'"
     fi
 fi
