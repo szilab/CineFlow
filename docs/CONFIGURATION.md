@@ -95,6 +95,14 @@ transmission:
   username:
   password:
 
+qbittorrent:
+  url:
+  username:
+  password:
+  directory:
+  category:
+  tags:
+
 library:
   directory: movies
   limit: 50
@@ -171,6 +179,20 @@ transmission:
 ```
 
 Authentication is optional when the Transmission instance does not require it.
+
+### qBittorrent
+
+```yaml
+qbittorrent:
+  url: http://qbittorrent:8080
+  username:
+  password:
+  directory:
+  category:
+  tags:
+```
+
+Authentication is optional when qBittorrent is configured to bypass WebAPI authentication for the CineFlow client. `directory` maps to qBittorrent `savepath`; `category` and `tags` are passed through when configured.
 
 ### Library
 

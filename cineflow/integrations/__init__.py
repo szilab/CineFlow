@@ -17,6 +17,7 @@ MODULES = {
     "Jackett": "jackett",
     "Jellyfin": "jellyfin",
     "Plex": "plex",
+    "QBittorrent": "qbittorrent",
     "Transmission": "transmission",
 }
 
