@@ -52,7 +52,7 @@ push_with_retry() {
     done
 }
 
-if [ -n "$GITHUB_ACTIONS" ]; then
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
     REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
     if [ "$GITHUB_REF" = "refs/heads/master" ] || [ "$GITHUB_REF" = "refs/heads/main" ]; then
         docker tag "$PYTHON_PACKAGE:local-$VERSION" "$REGISTRY/$PYTHON_PACKAGE:$VERSION"

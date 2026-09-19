@@ -5,7 +5,9 @@ import stat
 import subprocess
 
 
-def _run_docker_build_script(tmp_path, *, push_failures: int) -> tuple[subprocess.CompletedProcess[str], str]:
+def _run_docker_build_script(
+    tmp_path, *, push_failures: int, github_ref: str = "refs/heads/main"
+) -> tuple[subprocess.CompletedProcess[str], str]:
     project_root = tmp_path
     scripts_dir = project_root / ".github" / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -69,7 +71,7 @@ printf 'sleep %s\\n' "$*" >> "{log_path}"
             "PATH": f"{fakebin}{os.pathsep}{env['PATH']}",
             "GITHUB_ACTIONS": "true",
             "GITHUB_REPOSITORY_OWNER": "szilab",
-            "GITHUB_REF": "refs/heads/main",
+            "GITHUB_REF": github_ref,
         }
     )
 
@@ -100,3 +102,12 @@ def test_docker_build_fails_after_exhausting_push_retries(tmp_path) -> None:
     assert result.returncode == 1
     assert "after 3 attempts" in result.stdout
     assert docker_log.splitlines().count("push ghcr.io/szilab/cineflow:2.2.0") == 3
+
+
+def test_docker_build_uses_develop_tag_for_retrying_pushes(tmp_path) -> None:
+    result, docker_log = _run_docker_build_script(
+        tmp_path, push_failures=1, github_ref="refs/heads/develop"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert docker_log.splitlines().count("push ghcr.io/szilab/cineflow:dev-2.2.0") == 2
