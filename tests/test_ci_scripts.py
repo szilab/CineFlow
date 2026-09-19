@@ -1,13 +1,11 @@
-"""Regression tests for CI helper scripts."""
-
-from pathlib import Path
 import os
+from pathlib import Path
 import shutil
 import stat
 import subprocess
 
 
-def test_docker_build_retries_registry_push_failures(tmp_path) -> None:
+def _run_docker_build_script(tmp_path, *, push_failures: int) -> tuple[subprocess.CompletedProcess[str], str]:
     project_root = tmp_path
     scripts_dir = project_root / ".github" / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -43,7 +41,7 @@ case "$1" in
     fi
     count=$((count + 1))
     printf '%s' "$count" > "{push_count_path}"
-    if [ "$count" -eq 1 ]; then
+    if [ "$count" -le {push_failures} ]; then
       echo "unknown blob" >&2
       exit 1
     fi
@@ -85,6 +83,20 @@ printf 'sleep %s\\n' "$*" >> "{log_path}"
         timeout=10,
     )
 
+    return result, log_path.read_text(encoding="utf-8")
+
+
+def test_docker_build_retries_registry_push_failures(tmp_path) -> None:
+    result, docker_log = _run_docker_build_script(tmp_path, push_failures=1)
+
     assert result.returncode == 0, result.stderr or result.stdout
     assert "Retrying in 5s" in result.stdout
-    assert log_path.read_text(encoding="utf-8").splitlines().count("push ghcr.io/szilab/cineflow:2.2.0") == 2
+    assert docker_log.splitlines().count("push ghcr.io/szilab/cineflow:2.2.0") == 2
+
+
+def test_docker_build_fails_after_exhausting_push_retries(tmp_path) -> None:
+    result, docker_log = _run_docker_build_script(tmp_path, push_failures=3)
+
+    assert result.returncode == 1
+    assert "after 3 attempts" in result.stdout
+    assert docker_log.splitlines().count("push ghcr.io/szilab/cineflow:2.2.0") == 3
