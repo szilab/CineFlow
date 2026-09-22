@@ -216,6 +216,10 @@ library:
 
 Cleanup runs synchronously when the library is read through its normal `get` action.
 
+Library identity is based on TMDb ID, with IMDb ID as a fallback. Once an item
+is exported, a title punctuation or release-year change reuses its existing
+directory rather than creating a duplicate.
+
 ## Poster Rules
 
 The library module can modify exported poster images according to rules.

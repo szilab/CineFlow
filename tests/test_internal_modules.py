@@ -111,6 +111,34 @@ def test_library_put_only_replaces_a_release_with_a_better_preference_score(monk
     assert handler.items[item]["torrent"] == better_release["torrent"]
 
 
+def test_library_put_reuses_a_matching_tmdb_directory_when_title_or_year_changes(monkeypatch) -> None:
+    handler = FakeHandler()
+    existing_item = "You+Me - Against the World (2026) [tmdbid-1641629]"
+    existing = {
+        "title": "You+Me - Against the World", "year": 2026, "tmdbid": 1641629,
+        "torrent": "You.Me.2026.1080p.HUN.WEB", "poster": "old-poster",
+    }
+    handler.items[existing_item] = dict(existing)
+    instance = library(handler)
+    monkeypatch.setattr(instance, "_create_poster", lambda media: "poster-image")
+    monkeypatch.setattr(
+        "cineflow.internal.library.cfg", lambda key, default=None: ["HUN", "HDR", "1080p"],
+    )
+    candidate = {
+        **existing,
+        "title": "You+Me – Against the World",
+        "year": 2025,
+        "torrent": "You.Me.2026.1080p.HUN.HDR.WEB",
+        "poster": "new-poster",
+    }
+
+    instance.put([candidate])
+
+    assert list(handler.items) == [existing_item]
+    assert handler.created == [(existing_item, "poster-image", None)]
+    assert handler.items[existing_item]["directory"] == existing_item
+
+
 def test_library_put_then_get_keeps_new_item_visible_to_downstream(monkeypatch) -> None:
     handler = FakeHandler()
     instance = library(handler)

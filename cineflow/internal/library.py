@@ -65,21 +65,25 @@ class Library(LibraryBase):
         """Import the media to the library."""
         for media in data or []:
             item = self._item_name(media=media)
-            if self._handler.exists(item=item):
+            existing = None
+            if matching_items := self._matching_items(media=media):
+                existing = self._preferred_item(items=matching_items)
+                item = existing['directory']
+            elif self._handler.exists(item=item):
                 existing = self._handler.imprt(item=item)
-                if existing:
-                    preferences = cfg('jackett.search_preference', default=[])
-                    current_score = search_preference_score(
-                        existing.get('torrent'), preferences,
-                    )
-                    candidate_score = search_preference_score(
-                        media.get('torrent'), preferences,
-                    )
-                    if candidate_score <= current_score:
-                        log(
-                            f"Item '{item}' already has an equal or better release "
-                            f"({current_score} >= {candidate_score}), skipping export.")
-                        continue
+            if existing:
+                preferences = cfg('jackett.search_preference', default=[])
+                current_score = search_preference_score(
+                    existing.get('torrent'), preferences,
+                )
+                candidate_score = search_preference_score(
+                    media.get('torrent'), preferences,
+                )
+                if candidate_score <= current_score:
+                    log(
+                        f"Item '{item}' already has an equal or better release "
+                        f"({current_score} >= {candidate_score}), skipping export.")
+                    continue
             if media.get('poster'):
                 image = self._create_poster(media=media)
                 if self._handler.make(item=item, image=image, resolution=media.get('resolution')):
@@ -114,6 +118,35 @@ class Library(LibraryBase):
         if '[tmdbid-' in directory and ']' in directory:
             return directory.split('[tmdbid-')[1].replace(']', '').strip()
         return None
+
+    def _matching_items(self, media: dict) -> List[Dict]:
+        """Find existing records with the same TMDb or IMDb identity."""
+        matches = []
+        for directory in self._handler.all():
+            existing = self._handler.imprt(item=directory.name)
+            if existing and self._same_identity(first=existing, second=media):
+                matches.append({**existing, 'directory': directory.name})
+        return matches
+
+    @staticmethod
+    def _same_identity(first: dict, second: dict) -> bool:
+        """Return whether two records share a TMDb or IMDb identifier."""
+        for key in ('tmdbid', 'imdbid'):
+            if first.get(key) and second.get(key) and str(first[key]) == str(second[key]):
+                return True
+        return False
+
+    @staticmethod
+    def _preferred_item(items: List[Dict]) -> Dict:
+        """Choose the highest-ranked release with a stable tie breaker."""
+        preferences = cfg('jackett.search_preference', default=[])
+        return max(
+            items,
+            key=lambda item: (
+                search_preference_score(item.get('torrent'), preferences),
+                item.get('directory', ''),
+            ),
+        )
 
     def _create_poster(self, media: dict) -> Image.Image:
         """Create a poster for the item."""
