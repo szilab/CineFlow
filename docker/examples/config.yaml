@@ -15,9 +15,9 @@ library:
   #   modification: none # border
   #   property: link
   #   color: yellow
-  - expression: contains
+  - expression: token
     property: torrent
-    value: hun
+    value: HUN
     case_sensitive: false
     color: red
     modification: border

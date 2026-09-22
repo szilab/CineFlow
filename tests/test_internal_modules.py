@@ -79,6 +79,38 @@ def test_library_put_skips_identical_media_and_exports_poster(monkeypatch) -> No
     assert changed["directory"] == "Film (2024) [tmdbid-8]"
 
 
+def test_library_put_only_replaces_a_release_with_a_better_preference_score(monkeypatch) -> None:
+    handler = FakeHandler()
+    item = "Film (2024) [tmdbid-7]"
+    existing = {
+        "title": "Film", "year": 2024, "tmdbid": 7, "poster": "old-poster",
+        "torrent": "Film.2024.1080p.HUN.WEB", "seeders": 20, "link": "old-link",
+    }
+    handler.items[item] = dict(existing)
+    instance = library(handler)
+    monkeypatch.setattr(instance, "_create_poster", lambda media: "poster-image")
+    monkeypatch.setattr(
+        "cineflow.internal.library.cfg",
+        lambda key, default=None: ["HUN", "HDR", "1080p", "2160p"],
+    )
+
+    same_release = dict(existing, seeders=200, link="new-link")
+    instance.put([same_release])
+
+    assert handler.created == []
+    assert handler.items[item] == existing
+
+    better_release = dict(
+        same_release,
+        torrent="Film.2024.1080p.HUN.HDR.WEB",
+        poster="new-poster",
+    )
+    instance.put([better_release])
+
+    assert handler.created == [(item, "poster-image", None)]
+    assert handler.items[item]["torrent"] == better_release["torrent"]
+
+
 def test_library_put_then_get_keeps_new_item_visible_to_downstream(monkeypatch) -> None:
     handler = FakeHandler()
     instance = library(handler)

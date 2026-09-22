@@ -11,6 +11,14 @@ steps:
         parentLibrary: "Trending Filmek"
         isFavorite: true
         allUsers: true
+  # Resolve Jellyfin's localized display title through TMDb before searching
+  # Jackett. This uses the item's TMDb ID and the configured tmdb.language.
+  - name: Normalize titles with TMDb
+    module: tmdb
+    action: enrich
+    input: previous
+    config:
+      must_match: true
   - name: Add Jackett data
     module: jackett
     action: enrich

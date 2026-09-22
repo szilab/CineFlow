@@ -3,8 +3,8 @@
 from typing import List, Dict
 from PIL import Image
 from cineflow.core.logger import log
-from cineflow.utils.misc import evaluate
-from cineflow.utils.misc import fix_imdbid
+from cineflow.core.config import cfg
+from cineflow.utils.misc import evaluate, fix_imdbid, search_preference_score
 from cineflow.utils.image import ImageHandler
 from cineflow.core.bases.module import LibraryBase
 
@@ -67,11 +67,19 @@ class Library(LibraryBase):
             item = self._item_name(media=media)
             if self._handler.exists(item=item):
                 existing = self._handler.imprt(item=item)
-                if existing and self._is_same_media(existing=existing, media=media):
-                    log(
-                        f"Item '{item}' already exists in library with "
-                        "identical metadata, skipping export.")
-                    continue
+                if existing:
+                    preferences = cfg('jackett.search_preference', default=[])
+                    current_score = search_preference_score(
+                        existing.get('torrent'), preferences,
+                    )
+                    candidate_score = search_preference_score(
+                        media.get('torrent'), preferences,
+                    )
+                    if candidate_score <= current_score:
+                        log(
+                            f"Item '{item}' already has an equal or better release "
+                            f"({current_score} >= {candidate_score}), skipping export.")
+                        continue
             if media.get('poster'):
                 image = self._create_poster(media=media)
                 if self._handler.make(item=item, image=image, resolution=media.get('resolution')):
@@ -81,11 +89,6 @@ class Library(LibraryBase):
                 image = None
                 log(f"Item '{media['title']}' has no poster, skipped.", level='WARNING')
         return data
-
-    def _is_same_media(self, existing: dict, media: dict) -> bool:
-        existing_data = {k: v for k, v in existing.items() if k not in ['poster', 'directory']}
-        new_data = {k: v for k, v in media.items() if k not in ['poster', 'directory']}
-        return existing_data == new_data
 
     def remove(self, data: List[Dict]) -> None:
         """Remove the media from the library."""

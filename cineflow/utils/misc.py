@@ -20,6 +20,19 @@ def sort_data(data: list, param: str, reverse: bool = False) -> list:
     return sorted(data, key=lambda x: x.get(param), reverse=reverse)
 
 
+def search_preference_score(torrent: str, preferences: list | None = None) -> int:
+    """Return the configured preference score for a torrent release name."""
+    if not torrent:
+        return 0
+    preferences = list(preferences or [])
+    preferences.append('')
+    return sum(
+        len(preferences) - index
+        for index, preference in enumerate(preferences)
+        if str(preference).lower() in str(torrent).lower()
+    )
+
+
 def __title_groups(title: str) -> None:
     title = title.replace(' ', '.')
     result = re.search(r'(.+)\.([12]\d\d\d)\.', title)
@@ -93,16 +106,28 @@ def evaluate(left: str, right: str, expression: str, wcase: bool = True) -> bool
         elif expression == 'gt':
             outcome = left > right
     else:
-        if not wcase:
-            left = left.lower() if left else ''
-            right = right.lower() if right else ''
-        if expression == 'eq':
-            outcome = left == right
-        elif expression == 'ne':
-            outcome = left != right
-        elif expression == 'contains':
-            outcome = right in left
+        outcome = _evaluate_text(left=left, right=right, expression=expression, wcase=wcase)
     return outcome
+
+
+def _evaluate_text(left: str, right: str, expression: str, wcase: bool) -> bool:
+    """Evaluate textual rule expressions."""
+    if not wcase:
+        left = left.lower() if left else ''
+        right = right.lower() if right else ''
+    if expression == 'eq':
+        return left == right
+    if expression == 'ne':
+        return left != right
+    if expression == 'contains':
+        return right in left
+    if expression == 'token':
+        return bool(re.search(
+            rf'(?<![A-Za-z0-9]){re.escape(str(right))}(?![A-Za-z0-9])',
+            str(left),
+            flags=0 if wcase else re.IGNORECASE,
+        ))
+    return False
 
 
 def load_module(name: str) -> object:

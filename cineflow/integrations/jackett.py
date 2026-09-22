@@ -3,7 +3,8 @@
 from typing import List, Any
 from cineflow.core.logger import log
 from cineflow.utils.misc import (
-    sort_data, fix_imdbid, sanitize_name, media_title, media_year, media_resolution
+    sort_data, fix_imdbid, sanitize_name, media_title, media_year, media_resolution,
+    search_preference_score,
 )
 from cineflow.core.bases.module import ConsumerBase
 
@@ -97,17 +98,11 @@ class Jackett(ConsumerBase):
 
     def _apply_search_pref(self, results: list) -> list:
         query_pref = list(self.cfg('search_preference', default=[]))
-        query_pref.append('')
-        scored_res = [{'s': None, 'r': r} for r in results]
-        for item in scored_res:
-            score = 0
-            for q in query_pref:
-                if str(q).lower() in str(item['r'].get('torrent', '')).lower():
-                    score += (len(query_pref) - query_pref.index(q))
-            item['s'] = score
-        scored_res = sorted(scored_res, key=lambda x: x['s'], reverse=True)
-        filtered = [r['r'] for r in scored_res]
-        return filtered
+        return sorted(
+            results,
+            key=lambda result: search_preference_score(result.get('torrent'), query_pref),
+            reverse=True,
+        )
 
     def _apply_size_limit(self, results: list) -> list:
         limit = int(self.cfg('size_limit_gb', default=0))

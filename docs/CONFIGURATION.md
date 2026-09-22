@@ -140,7 +140,12 @@ jackett:
   search_preference: ["HUN", "HDR", "1080p", "2160p"]
 ```
 
-Jackett can be used directly with download clients or omitted from workflows that use future higher-level integrations such as Radarr/Sonarr.
+Jackett can be used directly with download clients or omitted from workflows that
+use future higher-level integrations such as Radarr/Sonarr. Earlier
+`search_preference` entries receive higher scores. When CineFlow finds a
+release for an item already exported to the library, it rewrites the item only
+when the new release has a strictly higher score; tracker URL or seeder-count
+changes alone do not refresh it.
 
 ### Jellyfin
 
@@ -220,7 +225,7 @@ Example:
 ```yaml
 library:
   rules:
-    - expression: contains
+    - expression: token
       property: torrent
       value: HUN
       case_sensitive: false
@@ -232,11 +237,15 @@ Common fields:
 
 | Field | Description |
 |---|---|
-| `expression` | comparison such as `missing`, `exists`, or `contains` |
+| `expression` | comparison such as `missing`, `exists`, `contains`, or `token` |
 | `modification` | visual operation such as `grayscale`, `border`, or `triangle` |
 | `property` | media property to evaluate |
 | `value` | optional comparison value |
 | `case_sensitive` | optional case-sensitivity flag |
+
+`token` matches a complete release-name token. It matches `HUN` in
+`Some.Movie.2005.1080.HUN.DVDRip`, including when separated by `.`, `-`, `_`,
+or spaces, but does not match it inside `Hungry`.
 
 ## Environment Overrides
 

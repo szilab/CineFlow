@@ -15,6 +15,7 @@ from cineflow.utils.misc import (
     media_year,
     sanitize_name,
     sanitize_path,
+    search_preference_score,
     sort_data,
 )
 
@@ -99,6 +100,14 @@ def test_media_parsing_sorting_and_module_lookup() -> None:
     assert load_module("not_a_module") is None
 
 
+def test_search_preference_score_rewards_earlier_preferences() -> None:
+    preferences = ["HUN", "HDR", "1080p", "2160p"]
+
+    assert search_preference_score("Movie.2024.1080p.HUN", preferences) == 9
+    assert search_preference_score("Movie.2024.1080p.HUN.HDR", preferences) == 13
+    assert search_preference_score(None, preferences) == 0
+
+
 def test_module_lookup_uses_registries_without_scanning_files(monkeypatch) -> None:
     monkeypatch.setattr("pathlib.Path.iterdir", lambda _path: pytest.fail("filesystem scan"))
 
@@ -151,6 +160,10 @@ def test_fix_imdbid(value, expected) -> None:
         ("10", "2", "gt", True, True), ("a", "A", "eq", False, True),
         ("CineFlow", "flow", "contains", False, True), (None, None, "missing", True, True),
         ("value", None, "none", True, True), ("x", "y", "ne", True, True),
+        ("Some.Movie.2005.1080.Hun.DVDRip", "hun", "token", False, True),
+        ("Hungry.Movie.2000", "hun", "token", False, False),
+        ("Some_Movie-HUN", "hun", "token", False, True),
+        ("Some.Movie.HUN", "hun", "token", True, False),
     ],
 )
 def test_evaluate_operators(left, right, expression, case, expected) -> None:

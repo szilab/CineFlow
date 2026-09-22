@@ -209,6 +209,15 @@ steps:
         isFavorite: true
         allUsers: true
 
+  # Jellyfin may return a localized display title. Resolve the configured
+  # TMDb-language title by provider ID before querying Jackett.
+  - name: Normalize titles with TMDb
+    module: tmdb
+    action: enrich
+    input: previous
+    config:
+      must_match: true
+
   - name: Find release
     module: jackett
     action: enrich
