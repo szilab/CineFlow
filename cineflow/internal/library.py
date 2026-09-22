@@ -86,9 +86,14 @@ class Library(LibraryBase):
                     continue
             if media.get('poster'):
                 image = self._create_poster(media=media)
-                if self._handler.make(item=item, image=image, resolution=media.get('resolution')):
+                export_media = {**media, 'directory': item}
+                if self._handler.publish(
+                    item=item,
+                    media=export_media,
+                    image=image,
+                    resolution=media.get('resolution'),
+                ):
                     media['directory'] = item
-                    self._handler.export(item=item, media=media)
             else:
                 image = None
                 log(f"Item '{media['title']}' has no poster, skipped.", level='WARNING')

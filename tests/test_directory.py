@@ -69,6 +69,66 @@ def test_destructive_item_operation_cannot_escape_library_root(
     assert outside.exists()
 
 
+def test_publish_creates_a_complete_item_before_it_becomes_visible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = handler(tmp_path, monkeypatch)
+    item = "Film (2026) [tmdbid-7]"
+    media = {"title": "Film", "year": 2026, "tmdbid": 7}
+
+    assert library.publish(item=item, media=media)
+
+    item_path = library._path / item
+    assert library.imprt(item) == media
+    assert (item_path / "Film.mkv").exists()
+    assert library.all() == [item_path]
+
+
+def test_publish_recovers_an_interrupted_existing_item_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = handler(tmp_path, monkeypatch)
+    item = "Film (2026) [tmdbid-7]"
+    original = {"title": "Film", "year": 2026, "torrent": "old"}
+    replacement = {"title": "Film", "year": 2026, "torrent": "new"}
+    assert library.publish(item=item, media=original)
+    item_path = library._path / item
+    real_replace = directory.os.replace
+
+    def fail_staged_publish(source, destination):
+        if Path(source).name.startswith(library.STAGE_PREFIX) and Path(destination) == item_path:
+            raise OSError("simulated interruption")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(directory.os, "replace", fail_staged_publish)
+    assert not library.publish(item=item, media=replacement)
+    assert not item_path.exists()
+    monkeypatch.setattr(directory.os, "replace", real_replace)
+
+    recovered = handler(tmp_path, monkeypatch)
+
+    assert recovered.imprt(item) == replacement
+    assert not list(recovered._path.glob(f"{recovered.TRANSACTION_PREFIX}*"))
+    assert not list(recovered._path.glob(f"{recovered.BACKUP_PREFIX}*"))
+    assert not list(recovered._path.glob(f"{recovered.STAGE_PREFIX}*"))
+
+
+def test_remove_hides_item_before_a_failed_permanent_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = handler(tmp_path, monkeypatch)
+    item = "Film (2026) [tmdbid-7]"
+    assert library.publish(item=item, media={"title": "Film", "year": 2026})
+    monkeypatch.setattr(directory.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(OSError("busy")))
+
+    assert not library.remove(item)
+    assert not (library._path / item).exists()
+    assert library.all() == []
+    assert len(list((library._path / library.TRASH_DIRECTORY).iterdir())) == 1
+    library.cleanup()
+    assert len(list((library._path / library.TRASH_DIRECTORY).iterdir())) == 1
+
+
 def test_directory_handler_has_no_background_worker_lifecycle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

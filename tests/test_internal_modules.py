@@ -27,13 +27,10 @@ class FakeHandler:
     def exists(self, item):
         return item in self.items
 
-    def make(self, item, image, resolution):
+    def publish(self, item, media, image, resolution):
         self.created.append((item, image, resolution))
-        self.items.setdefault(item, {})
-        return True
-
-    def export(self, item, media):
         self.items[item] = dict(media)
+        return True
 
     def remove(self, item):
         self.removed.append(item)
