@@ -1,5 +1,7 @@
 """Directory handler safety and cleanup regression tests."""
 
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -136,3 +138,81 @@ def test_directory_handler_has_no_background_worker_lifecycle(
 
     assert not hasattr(library, "start")
     assert not hasattr(library, "_thread")
+
+
+def test_handlers_of_the_same_directory_share_one_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    first = handler(tmp_path, monkeypatch)
+    second = handler(tmp_path, monkeypatch)
+    other = handler(tmp_path, monkeypatch, "series")
+
+    assert first._lock is second._lock
+    assert first._lock is not other._lock
+
+
+def test_cleaner_waits_one_period_before_cleaning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Startup never deletes items; the first cleanup happens after the delay."""
+    cleaned = []
+    cleaner = directory.DirectoryCleaner(handler(tmp_path, monkeypatch))
+    cleaner.handler = type("Fake", (), {"cleanup": lambda self: cleaned.append(True)})()
+    waits = iter([False, True])
+    monkeypatch.setattr(cleaner._stop_event, "wait", lambda timeout: next(waits))
+    cleaner._running = True
+
+    cleaner.worker()
+
+    assert cleaned == [True]
+
+
+def test_cleaner_survives_cleanup_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cleaner = directory.DirectoryCleaner(handler(tmp_path, monkeypatch))
+
+    def failing_cleanup():
+        raise OSError("disk")
+
+    cleaner.handler = type("Fake", (), {"cleanup": lambda self: failing_cleanup()})()
+    waits = iter([False, False, True])
+    monkeypatch.setattr(cleaner._stop_event, "wait", lambda timeout: next(waits))
+    cleaner._running = True
+
+    cleaner.worker()
+
+
+@pytest.mark.parametrize("with_sample", [True, False])
+def test_published_video_carries_the_publish_time_not_the_sample_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_sample: bool,
+) -> None:
+    """Jellyfin sorts "Date added" by the video timestamps, so each publish must stamp its own time."""
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    sample = media_dir / "sample.1080p.mp4"
+    sample.write_bytes(b"video")
+    old = 1_600_000_000
+    os.utime(sample, (old, old))
+    monkeypatch.setenv("MEDIA_DIRECTORY", str(media_dir if with_sample else tmp_path / "missing"))
+    library = handler(tmp_path / "export", monkeypatch)
+    item = "Film (2026) [tmdbid-7]"
+    before = time.time() - 1
+
+    assert library.publish(item=item, media={"title": "Film", "year": 2026}, resolution="1080p")
+
+    assert (library._path / item / "Film.mkv").stat().st_mtime >= before
+
+
+def test_upgraded_release_gets_a_newer_video_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replacing an item changes the video mtime, which makes Jellyfin re-read "Date added"."""
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    sample = media_dir / "sample.1080p.mp4"
+    sample.write_bytes(b"video")
+    os.utime(sample, (1_500_000_000, 1_500_000_000))
+    monkeypatch.setenv("MEDIA_DIRECTORY", str(media_dir))
+    library = handler(tmp_path / "export", monkeypatch)
+    item = "Film (2026) [tmdbid-7]"
+    media = {"title": "Film", "year": 2026}
+    assert library.publish(item=item, media={**media, "torrent": "Film.1080p"}, resolution="1080p")
+    video = library._path / item / "Film.mkv"
+    os.utime(video, (1_600_000_000, 1_600_000_000))
+
+    assert library.publish(item=item, media={**media, "torrent": "Film.1080p.HUN"}, resolution="1080p")
+
+    assert video.stat().st_mtime > 1_600_000_000

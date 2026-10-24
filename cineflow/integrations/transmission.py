@@ -1,14 +1,15 @@
 """Transmission API consumer module."""
 
 import base64
+from urllib.parse import urljoin
 from typing import List, Dict, Any
 import requests
-from cineflow.core.bases.module import ConsumerBase
+from cineflow.core.bases.module import TorrentClientBase
 from cineflow.core.logger import log
-from cineflow.utils.misc import sanitize_name, media_title, media_year
+from cineflow.utils.misc import media_title, media_year
 
 
-class Transmission(ConsumerBase):
+class Transmission(TorrentClientBase):
     """
     Transmission API consumer module.
 
@@ -18,6 +19,8 @@ class Transmission(ConsumerBase):
         - password: Transmission password (optional)
     """
 
+    MAX_REDIRECTS = 5
+
     def __init__(self, config: dict = None) -> None:
         super().__init__(config=config)
         self.cache_time = 0
@@ -25,7 +28,8 @@ class Transmission(ConsumerBase):
         username = self.cfg('username', default=None)
         password = self.cfg('password', default=None)
         self._auth = (username, password) if username else None
-        self._session_id = self._get_session_id()
+        # the RPC session is opened on the first request, not at construction time
+        self._session_id = None
         self._data_mappings = {
             'title': ['name'],
             'year': ['name'],
@@ -49,26 +53,7 @@ class Transmission(ConsumerBase):
         else:
             log("No torrents found or invalid response from Transmission API.", level='WARNING')
             return []
-        results = []
-        for item in data:
-            if media := self.map(item=item):
-                if media and query and query in media.get('title'):
-                    results.append(media)
-                elif media and not query:
-                    results.append(media)
-                else:
-                    log(f"Skipping item '{item.get('name')}' invalid or not match.", level='DEBUG')
-        return results
-
-    def search(self, media: dict) -> dict:  # pylint: disable=arguments-differ
-        """Search media for the given title in torrent list."""
-        results = self.get(query=sanitize_name(name=media.get('title')))
-        if match := self.match(results=results, media=media):
-            return match
-        if media.get('alttitle'):
-            results = self.get(query=sanitize_name(name=media.get('alttitle')))
-            return self.match(results=results, media=media)
-        return None
+        return self._map_torrents(items=data, query=query)
 
     def put(self, data: List[Dict]) -> List[Dict]:
         """Add torrent to the download list."""
@@ -103,15 +88,31 @@ class Transmission(ConsumerBase):
         return None
 
     def _download_torrent(self, link: str, params: dict, media: dict) -> dict:
-        """Download the torrent file from the link."""
+        """Download the torrent file, or use the magnet link it redirects to."""
+        url = link
         try:
-            req = requests.get(link, timeout=30, allow_redirects=True, headers={'User-Agent': 'Transmission'})
-            req.raise_for_status()
-            if req.content.startswith(b'd8:announce'):
-                params['metainfo'] = base64.b64encode(req.content).decode()
-                return params
-            log(f"Jackett link not a file (Content-Type={req.headers.get('Content-Type', '')})", level='ERROR')
-            media['transmission_status'] = 'invalid_torrent'
+            for _ in range(self.MAX_REDIRECTS + 1):
+                req = requests.get(
+                    url, timeout=30, allow_redirects=False, headers={'User-Agent': 'Transmission'}
+                )
+                if req.is_redirect:
+                    url = urljoin(url, req.headers.get('Location', ''))
+                    if url.startswith('magnet:'):
+                        params['filename'] = url
+                        return params
+                    continue
+                req.raise_for_status()
+                if req.content.startswith(b'd8:announce'):
+                    params['metainfo'] = base64.b64encode(req.content).decode()
+                    return params
+                log(
+                    f"Jackett link not a file (Content-Type={req.headers.get('Content-Type', '')})",
+                    level='ERROR'
+                )
+                media['transmission_status'] = 'invalid_torrent'
+                return None
+            log(f"Too many redirects while downloading torrent for '{media.get('title')}'.", level='ERROR')
+            media['transmission_status'] = 'error'
         except requests.RequestException as exc:
             log(f"Failed to download torrent from Jackett: {exc}", level='ERROR')
             media['transmission_status'] = 'error'
@@ -132,6 +133,8 @@ class Transmission(ConsumerBase):
 
     def _rpc_request(self, method: str, params: dict = None) -> dict | None:
         """Make a request to the Transmission RPC API."""
+        if not self._session_id:
+            self._session_id = self._get_session_id()
         for attempt in range(2):
             response = self._handler.post(
                 endpoint=self.cfg('rpc_path', default='transmission/rpc'),

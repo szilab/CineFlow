@@ -21,25 +21,17 @@ RUN addgroup -S -g $GID $IMAGE_USER && \
     mkdir -p /usr/src/$IMAGE_USER $EXPORT_DIRECTORY $CFG_DIRECTORY && \
     chown -R $IMAGE_USER:$IMAGE_USER $EXPORT_DIRECTORY $CFG_DIRECTORY
 
-RUN apk add --no-cache \
-    gcc \
-    musl-dev \
-    linux-headers \
-    ca-certificates
-
 WORKDIR /tmp
 
 COPY dist/$WHEEL_FILE ./
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --force-reinstall $WHEEL_FILE[all]
+    pip install --no-cache-dir --force-reinstall $WHEEL_FILE
 
 COPY docker/examples/*.* $EXAMPLES_DIRECTORY/
 COPY docker/media/ $MEDIA_DIRECTORY/
 
 VOLUME ["$CFG_DIRECTORY", "$EXPORT_DIRECTORY"]
 
-COPY docker/entrypoint.sh /bin/entrypoint.sh
-RUN chmod +x /bin/entrypoint.sh
-
 USER $IMAGE_USER
-ENTRYPOINT ["/bin/entrypoint.sh"]
+# cineflow copies the examples into an empty configuration directory on first start
+ENTRYPOINT ["cineflow"]

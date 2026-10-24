@@ -38,7 +38,9 @@ def media_directory() -> Path:
 
 
 def bundled_examples_directory() -> Path:
-    """Return the shared example configuration source for source or frozen runs."""
+    """Return the example configuration source for Docker, frozen, or source runs."""
+    if configured := os.environ.get("EXAMPLES_DIRECTORY"):
+        return Path(configured).expanduser().resolve()
     if bundle_root := getattr(sys, "_MEIPASS", None):
         return Path(bundle_root) / "examples"
     return Path(__file__).resolve().parent.parent / "docker" / "examples"

@@ -21,8 +21,10 @@ class FakeHandler:
     def __init__(self, responses: dict[tuple[str, int | None], object]) -> None:
         self.responses = responses
         self.calls: list[tuple[str, int | None]] = []
+        self.kwargs: dict[str, dict] = {}
 
-    def get(self, endpoint: str, params: dict | None = None) -> FakeResponse:
+    def get(self, endpoint: str, params: dict | None = None, **kwargs) -> FakeResponse:
+        self.kwargs[endpoint] = kwargs
         page = (params or {}).get("page")
         request = (endpoint, page)
         self.calls.append(request)
@@ -123,3 +125,78 @@ def test_search_falls_back_to_title_when_tmdb_id_is_unusable() -> None:
 
     assert consumer.search(media)["tmdbid"] == 329865
     assert handler.calls == [("/search/movie", None)]
+
+
+def test_get_looks_up_imdb_ids_only_for_collected_items_with_long_cache() -> None:
+    item = {key: value for key, value in tmdb_item(1).items() if key != "imdb_id"}
+    other = {**item, "id": 2, "title": "Other"}
+    handler = FakeHandler({
+        ("/trending/movie/week", 1): {"results": [item, other]},
+        ("/trending/movie/week", 2): {"results": []},
+        ("/movie/1/external_ids", None): {"imdb_id": "tt0000042"},
+    })
+    consumer = tmdb_with_handler(handler, limit=100)
+
+    results = consumer.get(query="Arrival")
+
+    assert [result["imdbid"] for result in results] == [42]
+    assert ("/movie/2/external_ids", None) not in handler.calls
+    assert handler.kwargs["/movie/1/external_ids"] == {"cache_time": Tmdb.IMDB_CACHE_TIME}
+
+
+def test_trending_request_sends_only_supported_parameters() -> None:
+    handler = FakeHandler({("/trending/movie/week", 1): {"results": []}})
+    params = []
+    original = handler.get
+
+    def recording_get(endpoint, params_=None, **kwargs):
+        params.append(params_)
+        return original(endpoint, params_, **kwargs)
+
+    handler.get = lambda endpoint, params=None, **kwargs: recording_get(endpoint, params, **kwargs)
+    tmdb_with_handler(handler).get()
+
+    assert params == [{"page": 1}]
+
+
+def test_search_with_imdb_id_uses_find_endpoint() -> None:
+    found = {key: value for key, value in tmdb_item(329865).items() if key != "imdb_id"}
+    handler = FakeHandler({("/find/tt2543164", None): {"movie_results": [found]}})
+    consumer = tmdb_with_handler(handler)
+
+    match = consumer.search({"title": "Arrival", "year": "2016", "imdbid": 2543164})
+
+    assert match["tmdbid"] == 329865
+    assert match["imdbid"] == 2543164
+    assert handler.calls == [("/find/tt2543164", None)]
+
+
+def test_title_search_looks_up_imdb_id_only_for_the_match() -> None:
+    results = [
+        {key: value for key, value in tmdb_item(identifier, title).items() if key != "imdb_id"}
+        for identifier, title in ((1, "Arrival"), (2, "Arrival Again"), (3, "Other"))
+    ]
+    handler = FakeHandler({
+        ("/search/movie", None): {"results": results},
+        ("/movie/1/external_ids", None): {"imdb_id": "tt2543164"},
+    })
+    consumer = tmdb_with_handler(handler)
+
+    match = consumer.search({"title": "Arrival", "year": "2016"})
+
+    assert match["imdbid"] == 2543164
+    assert handler.calls == [("/search/movie", None), ("/movie/1/external_ids", None)]
+
+
+def test_failed_imdb_lookup_keeps_the_item_without_imdb_id() -> None:
+    item = {key: value for key, value in tmdb_item(1).items() if key != "imdb_id"}
+    handler = FakeHandler({
+        ("/trending/movie/week", 1): {"results": [item]},
+        ("/trending/movie/week", 2): {"results": []},
+        ("/movie/1/external_ids", None): FakeResponse(None, 0),
+    })
+
+    results = tmdb_with_handler(handler).get()
+
+    assert len(results) == 1
+    assert "imdbid" not in results[0]

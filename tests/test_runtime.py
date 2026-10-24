@@ -66,3 +66,17 @@ def test_bootstrap_never_overwrites_nonempty_configuration(tmp_path, monkeypatch
 
     assert runtime.bootstrap_configuration() == ()
     assert existing.read_text(encoding="utf-8") == "user: configuration\n"
+
+
+def test_examples_directory_environment_is_used_for_bootstrap(tmp_path, monkeypatch) -> None:
+    """Docker points the bootstrap at the examples copied into the image."""
+    examples = tmp_path / "examples"
+    examples.mkdir()
+    for filename in ("config.yaml", "from_lib.yaml", "to_lib.yaml"):
+        (examples / filename).write_text(f"# {filename}\n", encoding="utf-8")
+    monkeypatch.setenv("EXAMPLES_DIRECTORY", str(examples))
+    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path / "config"))
+
+    assert runtime.bundled_examples_directory() == examples
+    assert len(runtime.bootstrap_configuration()) == 3
+    assert (tmp_path / "config" / "to_lib.yaml").read_text(encoding="utf-8") == "# to_lib.yaml\n"

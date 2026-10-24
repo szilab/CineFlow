@@ -30,7 +30,7 @@ class Jackett(ConsumerBase):
         self._data_mappings = {
             'title': ['Title'],
             'year': ['Title'],
-            'link': ['Link'],
+            'link': ['Link', 'MagnetUri'],
             'size': ['Size'],
             'torrent': ['Title'],
             'seeders': ['Seeders'],
@@ -108,7 +108,8 @@ class Jackett(ConsumerBase):
         limit = int(self.cfg('size_limit_gb', default=0))
         if not limit:
             return results
-        return [r for r in results if r['size'] <= limit]
+        # unknown size cannot be proven to fit the limit
+        return [r for r in results if r.get('size') is not None and r['size'] <= limit]
 
     def _get_results(self, keywords: str = None) -> List[dict] | None:
         if self.cfg('include'):
@@ -136,37 +137,57 @@ class Jackett(ConsumerBase):
                 results.append(media)
         return results
 
-    def _parse_query(self, q: Any) -> tuple[str, int, str, bool]:
+    def _parse_query(self, q: Any) -> tuple[str, int, str, Any, int]:
         default = '', 0, None, False, 0
-        if not q or q == '':
+        if not q:
             return default
         if isinstance(q, str):
             return q, 0, None, False, 0
         if isinstance(q, dict):
-            return \
-                q.get('include', ''), q.get('seeders', 0), \
-                q.get('resolution', 0),  q.get('exclude', False), \
-                (int(q.get('size', 0)) or 0)
+            return (
+                q.get('include', ''), q.get('seeders', 0), q.get('resolution', 0),
+                q.get('exclude', False), int(q.get('size', 0) or 0),
+            )
         log(f"Invalid query type: {type(q)}. Query must be a string or a dictionary. Skipp option!")
         return default
 
+    @staticmethod
+    def _query_words(value: Any) -> list[str]:
+        """Return lower-case filter words from a string or a list."""
+        if isinstance(value, (list, tuple)):
+            return [str(word).lower() for word in value if str(word).strip()]
+        return [word.lower() for word in str(value or '').split()]
+
     def _apply_query(self, results: list, query: dict) -> list:
-        query, seed, resolution, exclude, size = self._parse_query(query)
+        """Filter results by the query.
+
+        ``include`` words must all be present. ``exclude: true`` inverts the
+        ``include`` filter; a string or list ``exclude`` value names words that
+        must not be present, while ``include`` still applies.
+        """
+        include, seed, resolution, exclude, size = self._parse_query(query)
         if seed:
-            results = [r for r in results if r['seeders'] >= seed]
+            results = [r for r in results if (r.get('seeders') or 0) >= seed]
         if resolution:
-            results = [r for r in results if r['resolution'] == resolution]
+            results = [r for r in results if r.get('resolution') == resolution]
         if size and size > 0:
-            results = [r for r in results if r['size'] <= size]
-        if exclude:
+            results = [r for r in results if r.get('size') is not None and r['size'] <= size]
+        include_words = self._query_words(include)
+        if exclude is True:
+            exclude_words, include_words = include_words, []
+        elif exclude:
+            exclude_words = self._query_words(exclude)
+        else:
+            exclude_words = []
+        if exclude_words:
             results = [
                 r for r in results
-                if all(e.lower() not in r['torrent'].lower() for e in query.split(' '))
+                if all(word not in str(r.get('torrent', '')).lower() for word in exclude_words)
             ]
-        if query:
+        if include_words:
             results = [
                 r for r in results
-                if all(q.lower() in r['torrent'].lower() for q in query.split(' '))
+                if all(word in str(r.get('torrent', '')).lower() for word in include_words)
             ]
         return results
 

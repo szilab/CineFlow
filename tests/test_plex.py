@@ -89,3 +89,40 @@ def test_empty_library_initialization_keeps_no_libraries_error() -> None:
 
     with pytest.raises(ValueError, match="No libraries found in Plex"):
         client._get_libraries()
+
+
+def test_construction_does_not_contact_plex(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(Plex, "_get_libraries", lambda self: calls.append("libraries") or {"Movies": "1"})
+    client = Plex(config={"url": "http://plex", "token": "token"})
+    assert calls == []
+    client._handler = Mock()
+    client._handler.get.return_value = response(200, {"MediaContainer": {"Metadata": []}})
+
+    assert client.get({"parentLibrary": "Movies"}) == []
+    assert client.get() == []
+    assert calls == ["libraries"]
+
+
+@pytest.mark.parametrize("query", [{"searchTerm": "Film"}, {"sectionKey": "1"}, {}])
+def test_item_requests_ask_plex_for_provider_guids(query: dict) -> None:
+    client = plex()
+    client._handler.get.return_value = response(200, {"MediaContainer": {"Metadata": []}})
+
+    client._get_items(query)
+
+    assert all(call.kwargs["params"]["includeGuids"] == "1" for call in client._handler.get.call_args_list)
+
+
+def test_list_input_is_treated_as_items_not_as_a_query() -> None:
+    """A list from a previous step selects inverse input instead of crashing query parsing."""
+    client = plex()
+    client._handler.get.return_value = response(200, {"MediaContainer": {"Metadata": []}})
+
+    assert client._parse_query([{"plexid": "1"}]) == {}
+    assert client.get([{"plexid": "1"}]) == []
+
+
+def test_unknown_parent_library_is_rejected() -> None:
+    with pytest.raises(ValueError, match="not found in Plex"):
+        plex()._parse_query({"parentLibrary": "missing"})

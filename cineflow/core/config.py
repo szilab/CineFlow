@@ -1,5 +1,6 @@
 """Config module"""
 
+import copy
 import os
 import threading
 from typing import Any
@@ -26,7 +27,7 @@ class Config(metaclass=SingletonMeta):
     def __init__(self):
         self._file = str(config_directory() / "config.yaml")
         self._lock = threading.Lock()
-        self._mandatory = []
+        self._last_valid = None
         if not os.path.exists(self._file):
             Path(self._file).parent.mkdir(parents=True, exist_ok=True)
             Path(self._file).touch()
@@ -53,13 +54,34 @@ class Config(metaclass=SingletonMeta):
             self._save(config)
 
     def _load(self) -> dict:
-        """Load configuration"""
+        """Load configuration, keeping the last valid state when the file is broken."""
+        name = os.path.basename(self._file)
         try:
             with open(self._file, mode="r", encoding='UTF-8') as file:
                 config = yaml.safe_load(file)
-        except (FileNotFoundError, YAMLError) as e:
-            log(f"Error loading config file '{os.path.basename(self._file)}': {e}", level="ERROR")
-        return config or {}
+        except FileNotFoundError:
+            log(f"Config file '{name}' not found, using empty configuration.", level="WARNING")
+            config = {}
+        except (OSError, YAMLError) as e:
+            if self._last_valid is None:
+                raise ValueError(f"Config file '{name}' cannot be loaded: {e}") from e
+            log(
+                f"Error loading config file '{name}', using last valid configuration: {e}",
+                level="ERROR"
+            )
+            return copy.deepcopy(self._last_valid)
+        if config is None:
+            config = {}
+        if not isinstance(config, dict):
+            if self._last_valid is None:
+                raise ValueError(f"Config file '{name}' must contain a mapping.")
+            log(
+                f"Config file '{name}' must contain a mapping, using last valid configuration.",
+                level="ERROR"
+            )
+            return copy.deepcopy(self._last_valid)
+        self._last_valid = copy.deepcopy(config)
+        return config
 
     def _save(self, data: dict):
         """Save configuration"""

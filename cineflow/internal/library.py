@@ -3,7 +3,6 @@
 from typing import List, Dict
 from PIL import Image
 from cineflow.core.logger import log
-from cineflow.core.config import cfg
 from cineflow.utils.misc import evaluate, fix_imdbid, search_preference_score
 from cineflow.utils.image import ImageHandler
 from cineflow.core.bases.module import LibraryBase
@@ -14,13 +13,17 @@ class Library(LibraryBase):
     Module to handle media library.
 
     Configuration:
-        - path: path to the media library (required)
-        - limit: number of maximum items in library (default: 50)
-        - age: maximum age of items in library in days (default: 30)
+        - directory: library directory inside EXPORT_DIRECTORY (required)
+        - limit: number of maximum items in library (default: 500, minimum: 10)
+        - age: maximum age of items in library in days (default: 120, minimum: 30)
+        - search_preference: release name preferences used to rank releases (optional)
 
     Functions:
+        - get: list the media in the library
         - put: import media to the library
-        - find: find media in the library
+        - remove: remove media from the library
+
+    Items exceeding the limits are removed by a background cleanup worker.
     """
 
     def __init__(self, config: dict = None) -> None:
@@ -40,7 +43,6 @@ class Library(LibraryBase):
 
     def get(self) -> List[Dict]:
         """Get the list of items in the library."""
-        self._handler.cleanup()
         results = []
         directories = self._handler.all()
         for directory in directories:
@@ -72,7 +74,7 @@ class Library(LibraryBase):
             elif self._handler.exists(item=item):
                 existing = self._handler.imprt(item=item)
             if existing:
-                preferences = cfg('jackett.search_preference', default=[])
+                preferences = self.cfg('search_preference', default=[])
                 current_score = search_preference_score(
                     existing.get('torrent'), preferences,
                 )
@@ -95,7 +97,6 @@ class Library(LibraryBase):
                 ):
                     media['directory'] = item
             else:
-                image = None
                 log(f"Item '{media['title']}' has no poster, skipped.", level='WARNING')
         return data
 
@@ -118,12 +119,6 @@ class Library(LibraryBase):
             return media[key] + " (" + str(media['year']) + f") [tmdbid-{media['tmdbid']}]"
         return media[key] + " (" + str(media['year']) + ")"
 
-    def _get_tmdbid(self, directory: dict) -> str:
-        """Extract TMDB ID from the directory name."""
-        if '[tmdbid-' in directory and ']' in directory:
-            return directory.split('[tmdbid-')[1].replace(']', '').strip()
-        return None
-
     def _matching_items(self, media: dict) -> List[Dict]:
         """Find existing records with the same TMDb or IMDb identity."""
         matches = []
@@ -141,10 +136,9 @@ class Library(LibraryBase):
                 return True
         return False
 
-    @staticmethod
-    def _preferred_item(items: List[Dict]) -> Dict:
+    def _preferred_item(self, items: List[Dict]) -> Dict:
         """Choose the highest-ranked release with a stable tie breaker."""
-        preferences = cfg('jackett.search_preference', default=[])
+        preferences = self.cfg('search_preference', default=[])
         return max(
             items,
             key=lambda item: (

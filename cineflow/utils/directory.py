@@ -9,6 +9,7 @@ from uuid import uuid4
 from threading import Lock
 from pathlib import Path
 from cineflow.utils.image import ImageHandler
+from cineflow.core.bases.worker import WorkerBase
 from cineflow.core.logger import log
 from cineflow.utils.misc import sanitize_path
 from cineflow.runtime import export_directory, media_directory
@@ -22,16 +23,20 @@ class DirectoryHandler:
     BACKUP_PREFIX = '.cineflow-backup-'
     TRANSACTION_PREFIX = '.cineflow-txn-'
     TRASH_DIRECTORY = '.cineflow-trash'
+    _locks: dict[Path, Lock] = {}
+    _locks_guard = Lock()
 
     def __init__(self, directory: str) -> None:
         """Initialize the directory handler."""
         self._max_item_age = self.DEFAULT_MIN_ITEM_AGE
         self._max_item_count = self.DEFAULT_MIN_ITEM_COUNT
-        self._lock = Lock()
         if not directory:
             raise ValueError("Directory name must be provided.")
         self._root = export_directory()
         self._path = self._resolve_library_path(directory)
+        # every handler of the same directory shares one lock
+        with DirectoryHandler._locks_guard:
+            self._lock = DirectoryHandler._locks.setdefault(self._path, Lock())
         if self._path.exists() and not self._path.is_dir():
             raise ValueError(f"Directory path '{self._path}' exists but is not a directory.")
         try:
@@ -54,32 +59,6 @@ class DirectoryHandler:
                 log(f"Error listing items: {e}", level='WARNING')
         return []
 
-    def make(self, item: str, image: ImageHandler = None, resolution: str = None) -> bool:
-        """Make an item and file."""
-        item_path = self._item_path(item)
-        item = item_path.name
-        file = re.split(r'[\(\[]', item, maxsplit=1)[0].strip() + '.mkv'
-        with self._lock:
-            try:
-                if not item_path.exists():
-                    os.makedirs(item_path, exist_ok=True)
-                    log(f"Item '{item}' created successfully.")
-                media_dir = self._media_directory()
-                if media_dir and self._copy_sample(
-                    file_path=item_path / file, media_dir=media_dir, resolution=resolution
-                ):
-                    log(f"Media file for item '{item}' created from sample ({resolution or 'default'}).")
-                else:
-                    Path(item_path / file).touch(exist_ok=True)
-                    log(f"Media file for item '{item}' created as placeholder.")
-                if image:
-                    image.save(str(item_path))
-                    log(f"Image for item '{item}' saved successfully.")
-                return True
-            except (OSError, ValueError) as e:
-                log(f"Failed to create: {e}", level='WARNING')
-        return False
-
     def exists(self, item: str) -> bool:
         """Check if item exists."""
         item_path = self._item_path(item)
@@ -89,21 +68,6 @@ class DirectoryHandler:
                     return True
             except (OSError, ValueError) as e:
                 log(f"Failed to check existence: {e}", level='WARNING')
-        return False
-
-    def export(self, item: str, media: dict) -> bool:
-        """Atomically export metadata to an existing directory."""
-        item_path = self._item_path(item)
-        with self._lock:
-            try:
-                if not item_path.exists():
-                    log(f"Failed to export data: {item} missing", level='WARNING')
-                    return False
-                self._write_json(path=item_path / 'data.json', data=media)
-                log(f"Data for item '{item}' exported successfully.")
-                return True
-            except (OSError, ValueError) as e:
-                log(f"Failed to export data: {e}", level='WARNING')
         return False
 
     def publish(
@@ -199,6 +163,10 @@ class DirectoryHandler:
         else:
             Path(item_path / file).touch(exist_ok=True)
             log(f"Media file for item '{item_name}' created as placeholder.")
+        # Jellyfin derives "Date added" from the video file's timestamps and only
+        # re-reads it when the modification time changes. Stamping the publish
+        # time moves new and upgraded items to the front and nothing else.
+        os.utime(item_path / file)
         self._sync_file(item_path / file)
         if image:
             image.save(str(item_path))
@@ -373,10 +341,15 @@ class DirectoryHandler:
         """Copy a sample file matching the resolution to the destination path."""
         source = media_dir / f"sample.{resolution}.mp4"
         if source.exists():
-            shutil.copy2(str(source), str(file_path))
+            shutil.copyfile(source, file_path)
             return True
         log(f"No exact sample match for resolution '{resolution}'.", level='DEBUG')
         return False
+
+    @property
+    def path(self) -> Path:
+        """Return the resolved library directory."""
+        return self._path
 
     @property
     def max_item_age(self) -> int:
@@ -393,3 +366,66 @@ class DirectoryHandler:
     @max_item_count.setter
     def max_item_count(self, value: int) -> None:
         self._max_item_count = max(value, self.DEFAULT_MIN_ITEM_COUNT)
+
+
+class DirectoryCleaner(WorkerBase):
+    """Background worker that applies the age and count limits of one library directory."""
+
+    DELAY = 60  # minutes between cleanups
+
+    def __init__(self, handler: DirectoryHandler) -> None:
+        super().__init__()
+        self.name = handler.path.name
+        self.handler = handler
+        self.delay = self.DELAY
+
+    def run(self) -> None:
+        """Clean up the library directory."""
+        self.handler.cleanup()
+
+    def worker(self) -> None:
+        """Wait one period before each cleanup so startup never deletes items."""
+        while self._running:
+            if self._stop_event.wait(timeout=self._delay * 60):
+                break
+            try:
+                self.run()
+            except Exception as exc:  # pylint: disable=broad-except
+                log(f"Worker '{self.name}' failed: {exc}", level='ERROR')
+
+
+class CleanupScheduler:
+    """Owns the background cleanup workers of all library directories."""
+
+    _workers: dict[Path, DirectoryCleaner] = {}
+    _lock = Lock()
+
+    @classmethod
+    def schedule(cls, handler: DirectoryHandler) -> DirectoryCleaner:
+        """Start the cleanup of a directory once; later handlers update its limits."""
+        with cls._lock:
+            worker = cls._workers.get(handler.path)
+            if worker is None:
+                worker = DirectoryCleaner(handler=handler)
+                cls._workers[handler.path] = worker
+                worker.start()
+            else:
+                worker.handler = handler
+            return worker
+
+    def stop(self) -> bool:
+        """Stop all cleanup workers and report whether they terminated."""
+        with self._lock:
+            workers = list(self._workers.items())
+        stopped = True
+        for path, worker in workers:
+            if worker.stop():
+                with self._lock:
+                    self._workers.pop(path, None)
+            else:
+                stopped = False
+        return stopped
+
+    def close(self) -> bool:
+        """Report whether every cleanup worker has terminated."""
+        return self.stop()

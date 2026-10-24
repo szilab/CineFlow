@@ -70,7 +70,6 @@ execution: parallel
 tmdb:
   token:
   language: en-US
-  region: HU
 
 jackett:
   url:
@@ -107,6 +106,7 @@ library:
   directory: movies
   limit: 50
   age: 30
+  search_preference: ["HUN", "HDR", "1080p", "2160p"]
 ```
 
 Only configure modules that are actually used by your workflows. CineFlow does not require all integrations to be configured.
@@ -119,15 +119,19 @@ Only configure modules that are actually used by your workflows. CineFlow does n
 tmdb:
   token: API_KEY
   language: en-US
-  region: HU
 ```
 
 Common settings:
 
 - `token` — required API token;
 - `language` — metadata language, default `en-US`;
-- `region` — discovery/watch region, default `US`;
 - `quick_match` — optionally allow a single search result to match without strict year comparison.
+
+`get` collects the weekly trending list. The trending endpoint has no region
+filter, so the former `region` setting had no effect and is no longer read.
+IMDb IDs are looked up only for collected or matched items, and those lookups
+are cached for 30 days. `search` uses the TMDb ID when present, otherwise the
+IMDb ID, and falls back to a title search.
 
 ### Jackett
 
@@ -142,10 +146,20 @@ jackett:
 
 Jackett can be used directly with download clients or omitted from workflows that
 use future higher-level integrations such as Radarr/Sonarr. Earlier
-`search_preference` entries receive higher scores. When CineFlow finds a
-release for an item already exported to the library, it rewrites the item only
-when the new release has a strictly higher score; tracker URL or seeder-count
-changes alone do not refresh it.
+`search_preference` entries receive higher scores and sort the Jackett results.
+Results that only carry a magnet URI use it as their `link`.
+
+A `get` step query supports `include` (all words must be present), `exclude`,
+`seeders`, `resolution`, and `size` (GB). `exclude` is either a word list or a
+string of words that must not be present, or `true` to invert `include`:
+
+```yaml
+input:
+  query:
+    include: HUN
+    exclude: [CAM, TS]
+    seeders: 40
+```
 
 ### Jellyfin
 
@@ -211,10 +225,24 @@ library:
 ```
 
 - `directory` — subdirectory inside `EXPORT_DIRECTORY`;
-- `limit` — maximum retained exported items;
-- `age` — maximum age in days before cleanup.
+- `limit` — maximum retained exported items (default 500, minimum 10);
+- `age` — maximum age in days before cleanup (default 120, minimum 30);
+- `search_preference` — release name preferences used to rank releases.
 
-Cleanup runs synchronously when the library is read through its normal `get` action.
+A background worker applies `limit` and `age` once an hour for every library
+directory used by a flow. The first cleanup runs one hour after start, so
+reading the library with `get` never deletes items.
+
+Earlier `search_preference` entries receive higher scores. When CineFlow finds
+a release for an item already exported to the library, it rewrites the item
+only when the new release has a strictly higher score; tracker URL or
+seeder-count changes alone do not refresh it. The library reads only its own
+`search_preference`; copy the Jackett list here to keep the earlier ranking.
+
+Each exported video file gets the publish time as its modification time.
+Jellyfin derives "Date added" from these timestamps, so sorting the library by
+date added shows new items and upgraded releases first, while unchanged items
+keep their place.
 
 Library identity is based on TMDb ID, with IMDb ID as a fallback. Once an item
 is exported, a title punctuation or release-year change reuses its existing
@@ -280,6 +308,11 @@ Environment overrides are most suitable for simple scalar values. Nested keys an
 `config.yaml` is read by the configuration layer when values are requested, but module instances can retain merged configuration for their lifetime. Therefore, changing global module configuration while CineFlow is running is not currently guaranteed to update already-created module instances.
 
 For predictable operation, **restart CineFlow after changing global configuration**.
+
+If `config.yaml` becomes invalid while CineFlow is running (for example while it is
+being saved), CineFlow logs an error and keeps using the last valid configuration.
+An invalid file at startup stops CineFlow with a clear error instead of running
+with an empty configuration.
 
 Workflow files themselves are monitored by the flow manager and can be reloaded when their content changes.
 

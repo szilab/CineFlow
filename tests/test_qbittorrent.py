@@ -331,3 +331,34 @@ def test_send_request_uses_multipart_fields_referer_and_sid_cookie() -> None:
         },
         files={'urls': (None, 'magnet'), 'category': (None, 'movies')},
     )
+
+
+def test_construction_does_not_log_in(monkeypatch) -> None:
+    login = Mock()
+    monkeypatch.setattr(QBittorrent, "_login", login)
+
+    QBittorrent(config={"url": "http://qbittorrent:8080", "username": "user", "password": "pass"})
+
+    login.assert_not_called()
+
+
+def test_first_request_logs_in_when_credentials_are_configured() -> None:
+    client = qbittorrent()
+    client._sid = None
+    client.cfg = Mock(side_effect=lambda key, default=None: 'user' if key == 'username' else default)
+    client._login = Mock()
+    client._send_request = Mock(return_value=response(200, []))
+
+    assert client._api_request('GET', 'api/v2/torrents/info') == []
+    client._login.assert_called_once_with()
+
+
+def test_failed_first_login_is_an_api_failure() -> None:
+    client = qbittorrent()
+    client._sid = None
+    client.cfg = Mock(side_effect=lambda key, default=None: 'user' if key == 'username' else default)
+    client._login = Mock(side_effect=ValueError('Failed to authenticate with qBittorrent: 403'))
+    client._send_request = Mock()
+
+    assert client._api_request('GET', 'api/v2/torrents/info') is None
+    client._send_request.assert_not_called()

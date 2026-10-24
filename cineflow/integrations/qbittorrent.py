@@ -3,12 +3,12 @@
 from http.cookies import SimpleCookie
 from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Dict, List
-from cineflow.core.bases.module import ConsumerBase
+from cineflow.core.bases.module import TorrentClientBase
 from cineflow.core.logger import log
-from cineflow.utils.misc import media_title, media_year, sanitize_name
+from cineflow.utils.misc import media_title, media_year
 
 
-class QBittorrent(ConsumerBase):
+class QBittorrent(TorrentClientBase):
     """
     qBittorrent WebAPI consumer module.
 
@@ -41,8 +41,7 @@ class QBittorrent(ConsumerBase):
             'title': media_title,
             'year': media_year,
         }
-        if self.cfg('username', default=None):
-            self._login()
+        # login happens on the first API request, not at construction time
 
     def get(self, query: Any = None) -> List[Dict] | None:
         """Get torrents from the qBittorrent API."""
@@ -56,26 +55,7 @@ class QBittorrent(ConsumerBase):
         if not response:
             log("No torrents found in qBittorrent.", level='WARNING')
             return []
-        results = []
-        for item in response:
-            if media := self.map(item=item):
-                if media and query and query in sanitize_name(name=media.get('title')):
-                    results.append(media)
-                elif media and not query:
-                    results.append(media)
-                else:
-                    log(f"Skipping item '{item.get('name')}' invalid or not match.", level='DEBUG')
-        return results
-
-    def search(self, media: dict) -> dict:
-        """Search media for the given title in torrent list."""
-        results = self.get(query=sanitize_name(name=media.get('title')))
-        if match := self.match(results=results, media=media):
-            return match
-        if media.get('alttitle'):
-            results = self.get(query=sanitize_name(name=media.get('alttitle')))
-            return self.match(results=results, media=media)
-        return None
+        return self._map_torrents(items=response, query=query)
 
     def put(self, data: List[Dict]) -> List[Dict]:
         """Add torrent URLs to the qBittorrent download list."""
@@ -146,6 +126,12 @@ class QBittorrent(ConsumerBase):
         self, method: str, endpoint: str, data: dict = None, form: bool = False
     ) -> Any | None:
         """Make an authenticated qBittorrent WebAPI request with one 403 re-login retry."""
+        if self.cfg('username', default=None) and not self._sid:
+            try:
+                self._login()
+            except ValueError as exc:
+                log(str(exc), level='ERROR')
+                return None
         for attempt in range(2):
             response = self._send_request(method=method, endpoint=endpoint, data=data, form=form)
             if response.status != 403:

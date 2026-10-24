@@ -199,3 +199,39 @@ def test_inverse_common_cleans_old_item_when_trending_query_is_empty() -> None:
     query = {'parentLibrary': 'Trending Filmek', 'allUsers': True, 'isInverse': True}
 
     assert client.common([local_placeholder], query) == [local_placeholder]
+
+
+def test_construction_does_not_contact_jellyfin(monkeypatch) -> None:
+    """Users and libraries are loaded on first use, not by the constructor."""
+    calls = []
+    monkeypatch.setattr(Jellyfin, "_get_users", lambda self: calls.append("users") or {"user": "1"})
+    monkeypatch.setattr(Jellyfin, "_get_libraries", lambda self: calls.append("libraries") or {"Movies": "9"})
+    client = Jellyfin(config={"url": "http://jellyfin", "token": "token"})
+    assert calls == []
+    client._handler = Mock()
+    client._handler.get.return_value = response(200, {"Items": []})
+
+    assert client.get({"parentLibrary": "Movies"}) == []
+    assert client.get({"parentLibrary": "Movies"}) == []
+    assert calls == ["libraries", "users"]
+    assert client._handler.get.call_args.kwargs["params"]["ParentId"] == "9"
+
+
+def test_items_without_tmdb_id_are_kept_for_set_operations() -> None:
+    """A Jellyfin movie without a TMDb provider ID is still part of the library."""
+    client = Jellyfin.__new__(Jellyfin)
+    client.name = "jellyfin"
+    client._data_mappings = {
+        "title": ["Name"], "year": ["ProductionYear"], "jellyfinid": ["Id"], "tmdbid": ["ProviderIds"],
+    }
+    client._data_transforms = {"tmdbid": lambda value: dict(value).get("Tmdb")}
+    client._empty_property_allowed = False
+
+    assert client.map({"Name": "Film", "ProductionYear": 2020, "Id": "1", "ProviderIds": {"Imdb": "tt1"}}) == {
+        "title": "Film", "year": 2020, "jellyfinid": "1",
+    }
+
+
+def test_inverse_and_per_user_cannot_be_combined() -> None:
+    with pytest.raises(ValueError, match="perUser"):
+        jellyfin()._parse_query({"isInverse": True, "perUser": True})

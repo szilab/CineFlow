@@ -136,3 +136,27 @@ def test_default_headers_are_not_shared_between_handlers() -> None:
     first.headers["X-Request-ID"] = "first"
 
     assert "X-Request-ID" not in second.headers
+
+
+def test_request_cache_time_can_be_set_per_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    request_handler = handler()
+    request_handler._cache_handler._db = Mock()
+    request_handler._cache_handler._db.get_request.return_value = None
+    monkeypatch.setattr(requests, "request", Mock(return_value=response(data={"id": 1})))
+
+    request_handler.get("ids", cache_time=600)
+
+    request_handler._cache_handler._db.get_request.assert_called_once()
+    assert request_handler._cache_handler._db.get_request.call_args.kwargs["expire"] == 600
+    assert request_handler._cache_handler._db.store_request.call_args.kwargs["expire"] == 600
+
+
+def test_handler_without_cache_time_does_not_touch_the_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    request_handler = handler()
+    request_handler._cache_handler._db = Mock()
+    monkeypatch.setattr(requests, "request", Mock(return_value=response(data={"id": 1})))
+
+    request_handler.get("ids")
+
+    request_handler._cache_handler._db.get_request.assert_not_called()
+    request_handler._cache_handler._db.store_request.assert_not_called()

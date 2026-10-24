@@ -168,3 +168,40 @@ def test_fix_imdbid(value, expected) -> None:
 )
 def test_evaluate_operators(left, right, expression, case, expected) -> None:
     assert evaluate(left, right, expression, case) is expected
+
+
+def test_broken_config_at_startup_raises_a_clear_error(isolated_config_directory) -> None:
+    config = Config()
+    (isolated_config_directory / "config.yaml").write_text("a: [1,\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cannot be loaded"):
+        config.get("a")
+
+
+def test_broken_config_while_running_keeps_last_valid_state(isolated_config_directory) -> None:
+    config = Config()
+    config_file = isolated_config_directory / "config.yaml"
+    config_file.write_text("tmdb:\n  token: valid\n", encoding="utf-8")
+    assert config.get("tmdb.token") == "valid"
+
+    config_file.write_text("tmdb: [broken\n", encoding="utf-8")
+
+    assert config.get("tmdb.token") == "valid"
+
+
+def test_non_mapping_config_keeps_last_valid_state(isolated_config_directory) -> None:
+    config = Config()
+    config_file = isolated_config_directory / "config.yaml"
+    config_file.write_text("execution: sequential\n", encoding="utf-8")
+    assert config.get("execution") == "sequential"
+
+    config_file.write_text("- just\n- a list\n", encoding="utf-8")
+
+    assert config.get("execution") == "sequential"
+
+
+def test_missing_config_file_is_an_empty_configuration(isolated_config_directory) -> None:
+    config = Config()
+    (isolated_config_directory / "config.yaml").unlink()
+
+    assert config.get("execution", default="parallel") == "parallel"

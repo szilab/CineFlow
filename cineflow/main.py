@@ -10,6 +10,7 @@ from cineflow.core.config import Config
 from cineflow.core.database import Database
 from cineflow.core.runner import FlowManager
 from cineflow.runtime import bootstrap_configuration
+from cineflow.utils.directory import CleanupScheduler
 
 
 class MainApp:
@@ -24,6 +25,7 @@ class MainApp:
             log("Initialize singleton modules", level="MSG")
             self._components.append(Config())
             self._components.append(Database())
+            self._components.append(CleanupScheduler())
             log("Start FlowManager", level="MSG")
             self._components.append(FlowManager())
         except Exception as e:

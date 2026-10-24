@@ -2,11 +2,11 @@
 
 from typing import List, Any
 from cineflow.core.logger import log
-from cineflow.core.bases.module import ConsumerBase
+from cineflow.core.bases.module import MediaServerBase
 from cineflow.utils.misc import fix_imdbid
 
 
-class Jellyfin(ConsumerBase):
+class Jellyfin(MediaServerBase):
     """
     Jellyfin API consumer module.
 
@@ -18,6 +18,9 @@ class Jellyfin(ConsumerBase):
     Functions:
         - search: Search media for a given title.
     """
+
+    ID_KEY = 'jellyfinid'
+    LIBRARY_KEY = 'ParentId'
 
     def __init__(self, config: dict = None) -> None:
         super().__init__(config=config, required=['url', 'token'])
@@ -39,72 +42,48 @@ class Jellyfin(ConsumerBase):
         self.params = {
             "ApiKey": self.cfg("token")
         }
-        self._user_list = self._get_users()
-        self._library_list = self._get_libraries()
+        # users and libraries are loaded on first use, not at construction time
+        self._user_list = None
+        self._library_list = None
 
-    def get(self, query: Any = None) -> List[dict] | None:
-        """Collect media from Jellyfin."""
-        input_items = query if isinstance(query, list) else []
-        query = self._parse_query(query)
-        results = None
-        if query.get("isInverse"):
-            del query["isInverse"]
-            inverse_query = {
-                key: query[key] for key in ("allUsers", "userName") if query.get(key)
-            }
-            q_items = self._get_items(query=query)
-            if q_items is not None:
-                results = self._inverse_items(
-                    query_items=input_items or q_items,
-                    query=inverse_query,
-                )
-        else:
-            results = self._get_items(query=query)
-        if results is None:
-            return None
-        return list({
-            item['jellyfinid']: item for item in results if item.get('jellyfinid')
-        }.values())
+    def _users(self) -> dict:
+        """Return the Jellyfin users, loading them on first use."""
+        if self._user_list is None:
+            self._user_list = self._get_users()
+        return self._user_list
 
-    def search(self, media: dict) -> dict:
-        """Search media for the given title."""
-        results = self._get_items()
-        return self.match(results=results, media=media)
+    def _libraries(self) -> dict:
+        """Return the Jellyfin libraries, loading them on first use."""
+        if self._library_list is None:
+            self._library_list = self._get_libraries()
+        return self._library_list
 
     def _parse_query(self, query: Any) -> dict:
-        if not query:
-            return {}
-        if isinstance(query, str):
-            return {"searchTerm": query}
-        if not isinstance(query, (dict, list)):
-            raise ValueError("Jellyfin 'query' must be a string or a dictionary.")
-        if isinstance(query, dict):
-            query = dict(query)
-            if query.get("isInverse") and query.get("perUser"):
-                raise ValueError("Cannot set both 'isInverse' and 'perUser' in one query.")
-            if query.get("parentLibrary"):
-                if query.get("parentLibrary") not in self._library_list:
-                    raise ValueError(f"Library '{query['parentLibrary']}' not found in Jellyfin.")
-                query["ParentId"] = self._library_list[query["parentLibrary"]]
-                del query["parentLibrary"]
-        return query
+        if isinstance(query, dict) and query.get("isInverse") and query.get("perUser"):
+            raise ValueError("Cannot set both 'isInverse' and 'perUser' in one query.")
+        return super()._parse_query(query)
+
+    def _inverse_query(self, query: dict) -> dict:
+        """Compare against the full library of the same users."""
+        return {key: query[key] for key in ("allUsers", "userName") if query.get(key)}
 
     def _query_user_ids(self, query: dict) -> List[dict]:
+        users = self._users()
         if not query or not isinstance(query, dict):
-            return [next(iter(self._user_list.values()))] if self._user_list else [None]
+            return [next(iter(users.values()))] if users else [None]
         if query.get("allUsers"):
             del query["allUsers"]
-            users = [id for _, id in self._user_list.items()]
-            if not users:
+            user_ids = list(users.values())
+            if not user_ids:
                 raise ValueError("No users found in Jellyfin, skip the rest.")
-            return users
+            return user_ids
         if query.get("userName"):
-            if query.get("userName") not in self._user_list:
+            if query.get("userName") not in users:
                 raise ValueError(f"User '{query['userName']}' not found in Jellyfin.")
             user_name = query["userName"]
             del query["userName"]
-            return [self._user_list.get(user_name)]
-        return [next(iter(self._user_list.values()))] if self._user_list else [None]
+            return [users.get(user_name)]
+        return [next(iter(users.values()))] if users else [None]
 
     def _get_items(self, query: dict = None) -> List[dict] | None:
         results = []

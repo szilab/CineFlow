@@ -1,12 +1,12 @@
 """Plex API consumer module."""
 
-from typing import List, Any
+from typing import List
 from cineflow.core.logger import log
-from cineflow.core.bases.module import ConsumerBase
+from cineflow.core.bases.module import MediaServerBase
 from cineflow.utils.misc import fix_imdbid
 
 
-class Plex(ConsumerBase):
+class Plex(MediaServerBase):
     """
     Plex API consumer module.
 
@@ -19,6 +19,9 @@ class Plex(ConsumerBase):
         - get: Collect media from Plex.
         - search: Search media for a given title.
     """
+
+    ID_KEY = 'plexid'
+    LIBRARY_KEY = 'sectionKey'
 
     def __init__(self, config: dict = None) -> None:
         super().__init__(config=config, required=['url', 'token'])
@@ -40,106 +43,49 @@ class Plex(ConsumerBase):
             "X-Plex-Token": self.cfg("token"),
             "Accept": "application/json"
         }
-        self._library_list = self._get_libraries()
+        # libraries are loaded on first use, not at construction time
+        self._library_list = None
 
-    def get(self, query: Any = None) -> List[dict] | None:
-        """Collect media from Plex."""
-        input_items = query if isinstance(query, list) else []
-        query = self._parse_query(query)
-        results = None
-        if query.get("isInverse"):
-            del query["isInverse"]
-            q_items = self._get_items(query=query)
-            if q_items is not None:
-                results = self._inverse_items(query_items=input_items or q_items)
-        else:
-            results = self._get_items(query=query)
-        if results is None:
-            return None
-        return list({
-            item['plexid']: item for item in results if item.get('plexid')
-        }.values())
+    def _libraries(self) -> dict:
+        """Return the Plex libraries, loading them on first use."""
+        if self._library_list is None:
+            self._library_list = self._get_libraries()
+        return self._library_list
 
-    def search(self, media: dict) -> dict:
-        """Search media for the given title."""
-        results = self._get_items()
-        return self.match(results=results, media=media)
-
-    def _parse_query(self, query: Any) -> dict:
-        if not query:
-            return {}
-        if isinstance(query, str):
-            return {"searchTerm": query}
-        if not isinstance(query, (dict, list)):
-            raise ValueError("Plex 'query' must be a string or a dictionary.")
-        if isinstance(query, dict):
-            query = dict(query)
-            if query.get("parentLibrary"):
-                if query.get("parentLibrary") not in self._library_list:
-                    raise ValueError(f"Library '{query['parentLibrary']}' not found in Plex.")
-                query["sectionKey"] = self._library_list[query["parentLibrary"]]
-                del query["parentLibrary"]
-        return query
-
-    def _get_items(self, query: dict = None) -> List[dict] | None:  # noqa: C901
-        results = []
+    def _get_items(self, query: dict = None) -> List[dict] | None:
         query = query or {}
-
-        # If searching by text
         if query.get("searchTerm"):
-            params = {"query": query["searchTerm"]}
-            if self._kind:
-                params["type"] = "1" if self._kind == "movie" else "2"
-            response = self._handler.get(
-                endpoint="/search",
-                params=params,
-            )
-            if response.status == 0 or response.status >= 400:
-                log(f"Plex API error {response.status} for search: {params}", level="ERROR")
-                return None
-            if not response.data or not response.data.get('MediaContainer'):
-                return []
-            metadata = response.data.get('MediaContainer', {}).get('Metadata', [])
-            results.extend(metadata)
-
-        # If querying a specific library section
+            calls = [("/search", {"query": query["searchTerm"]}, "search")]
         elif query.get("sectionKey"):
-            params = {}
-            if self._kind:
-                params["type"] = "1" if self._kind == "movie" else "2"
-            response = self._handler.get(
-                endpoint=f"/library/sections/{query['sectionKey']}/all",
-                params=params,
-            )
-            if response.status == 0 or response.status >= 400:
-                log(f"Plex API error {response.status} for section {query['sectionKey']}", level="ERROR")
-                return None
-            if not response.data or not response.data.get('MediaContainer'):
-                return []
-            metadata = response.data.get('MediaContainer', {}).get('Metadata', [])
-            results.extend(metadata)
-
-        # Otherwise, get all items from all libraries
+            calls = [(f"/library/sections/{query['sectionKey']}/all", {}, f"section {query['sectionKey']}")]
         else:
-            for lib_name, lib_key in self._library_list.items():
-                params = {}
-                if self._kind:
-                    params["type"] = "1" if self._kind == "movie" else "2"
-                response = self._handler.get(
-                    endpoint=f"/library/sections/{lib_key}/all",
-                    params=params,
-                )
-                if response.status == 0 or response.status >= 400:
-                    log(f"Plex API error {response.status} for library '{lib_name}'", level="ERROR")
-                    return None
-                if not response.data or not response.data.get('MediaContainer'):
-                    continue
-                metadata = response.data.get('MediaContainer', {}).get('Metadata', [])
-                results.extend(metadata)
-
+            calls = [
+                (f"/library/sections/{key}/all", {}, f"library '{name}'")
+                for name, key in self._libraries().items()
+            ]
+        results = []
+        for endpoint, params, label in calls:
+            if (metadata := self._metadata(endpoint=endpoint, params=params, label=label)) is None:
+                return None
+            results.extend(metadata)
         return [self.map(item=item) for item in results]
 
-    def _inverse_items(self, query_items: List[dict]) -> List[dict] | None:
+    def _metadata(self, endpoint: str, params: dict, label: str) -> list | None:
+        """Return the metadata list of one Plex request, or None on failure."""
+        params = {**params, "includeGuids": "1"}
+        if self._kind:
+            params["type"] = "1" if self._kind == "movie" else "2"
+        response = self._handler.get(endpoint=endpoint, params=params)
+        if response.status == 0 or response.status >= 400:
+            log(f"Plex API error {response.status} for {label}", level="ERROR")
+            return None
+        if not response.data or not response.data.get('MediaContainer'):
+            return []
+        return response.data['MediaContainer'].get('Metadata', [])
+
+    def _inverse_items(
+        self, query_items: List[dict], query: dict = None  # pylint: disable=unused-argument
+    ) -> List[dict] | None:
         if not query_items:
             log(
                 "Query items are empty, skipping inverse calculation "

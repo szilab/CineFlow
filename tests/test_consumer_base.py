@@ -94,3 +94,10 @@ def test_match_uses_alternate_title_after_primary_title() -> None:
     result = {"title": "Different Title", "alttitle": "Original Title", "year": "2016"}
 
     assert consumer.match([result], media) == result
+
+
+def test_title_match_ignores_year_type_differences() -> None:
+    """Plex returns an integer year while TMDb and Jackett return strings."""
+    consumer = FakeConsumer([{"title": "Arrival", "year": 2016}])
+
+    assert consumer.common([{"title": "Arrival", "year": "2016"}]) == [{"title": "Arrival", "year": "2016"}]

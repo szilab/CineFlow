@@ -4,6 +4,7 @@ from pathlib import Path
 
 from cineflow.internal.library import Library
 from cineflow.internal.tools import Tools
+from cineflow.utils.directory import CleanupScheduler
 
 
 class FakeHandler:
@@ -40,6 +41,7 @@ class FakeHandler:
 def library(handler: FakeHandler) -> Library:
     """Create a library with its orchestration dependencies replaced by a fake."""
     instance = Library.__new__(Library)
+    instance.name = "library"
     instance._handler = handler
     instance._cfg = {}
     instance._data_mappings = {"title": ["title"], "year": ["year"]}
@@ -57,7 +59,8 @@ def test_library_get_maps_valid_entries_and_retains_unknown_directories() -> Non
     handler.items = {"Known (2024)": {"title": "Known", "year": 2024}, "odd-name": {}}
     result = library(handler).get()
     assert result == [{"title": "Known", "year": 2024}]
-    assert handler.cleanups == 1
+    # cleanup runs in the background worker, never as part of a read
+    assert handler.cleanups == 0
 
 
 def test_library_put_skips_identical_media_and_exports_poster(monkeypatch) -> None:
@@ -86,10 +89,7 @@ def test_library_put_only_replaces_a_release_with_a_better_preference_score(monk
     handler.items[item] = dict(existing)
     instance = library(handler)
     monkeypatch.setattr(instance, "_create_poster", lambda media: "poster-image")
-    monkeypatch.setattr(
-        "cineflow.internal.library.cfg",
-        lambda key, default=None: ["HUN", "HDR", "1080p", "2160p"],
-    )
+    instance._cfg = {"search_preference": ["HUN", "HDR", "1080p", "2160p"]}
 
     same_release = dict(existing, seeders=200, link="new-link")
     instance.put([same_release])
@@ -108,6 +108,42 @@ def test_library_put_only_replaces_a_release_with_a_better_preference_score(monk
     assert handler.items[item]["torrent"] == better_release["torrent"]
 
 
+def test_library_ranking_ignores_jackett_configuration(
+    tmp_path, monkeypatch, isolated_config_directory,
+) -> None:
+    """Library release ranking only uses the library's own configuration."""
+    monkeypatch.setenv("EXPORT_DIRECTORY", str(tmp_path / "export"))
+    isolated_config_directory.mkdir(parents=True, exist_ok=True)
+    (isolated_config_directory / "config.yaml").write_text(
+        "jackett:\n  search_preference: [HUN]\nlibrary:\n  directory: movies\n", encoding="utf-8",
+    )
+    instance = Library()
+    assert instance.cfg("search_preference", default=[]) == []
+    handler = FakeHandler()
+    item = "Film (2024) [tmdbid-7]"
+    handler.items[item] = {"title": "Film", "year": 2024, "tmdbid": 7, "torrent": "Film.2024.1080p"}
+    instance._handler = handler
+    monkeypatch.setattr(instance, "_create_poster", lambda media: "poster-image")
+    candidate = {"title": "Film", "year": 2024, "tmdbid": 7, "poster": "url", "torrent": "Film.2024.1080p.HUN"}
+
+    instance.put([candidate])
+
+    assert handler.created == []
+
+
+def test_library_construction_schedules_background_cleanup(
+    tmp_path, monkeypatch, isolated_config_directory,
+) -> None:
+    monkeypatch.setenv("EXPORT_DIRECTORY", str(tmp_path / "export"))
+    first = Library(config={"directory": "movies"})
+    second = Library(config={"directory": "movies", "limit": 20})
+
+    worker = CleanupScheduler._workers[first._handler.path]
+    assert worker.handler is second._handler
+    assert worker.handler.max_item_count == 20
+    assert worker.delay == 60
+
+
 def test_library_put_reuses_a_matching_tmdb_directory_when_title_or_year_changes(monkeypatch) -> None:
     handler = FakeHandler()
     existing_item = "You+Me - Against the World (2026) [tmdbid-1641629]"
@@ -118,9 +154,7 @@ def test_library_put_reuses_a_matching_tmdb_directory_when_title_or_year_changes
     handler.items[existing_item] = dict(existing)
     instance = library(handler)
     monkeypatch.setattr(instance, "_create_poster", lambda media: "poster-image")
-    monkeypatch.setattr(
-        "cineflow.internal.library.cfg", lambda key, default=None: ["HUN", "HDR", "1080p"],
-    )
+    instance._cfg = {"search_preference": ["HUN", "HDR", "1080p"]}
     candidate = {
         **existing,
         "title": "You+Me – Against the World",
@@ -146,7 +180,7 @@ def test_library_put_then_get_keeps_new_item_visible_to_downstream(monkeypatch) 
     result = instance.get()
 
     assert result == [{"directory": "New (2026)", "title": "New", "year": 2026}]
-    assert handler.cleanups == 1
+    assert handler.cleanups == 0
 
 
 def test_library_remove_and_poster_rules(monkeypatch) -> None:

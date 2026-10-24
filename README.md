@@ -213,9 +213,12 @@ For detailed syntax and examples, see:
 - `CFG_DIRECTORY`: Configuration directory path; overrides `CINEFLOW_HOME` for configuration
 - `EXPORT_DIRECTORY`: Library export path; overrides `CINEFLOW_HOME` for exports
 - `MEDIA_DIRECTORY`: Optional directory containing external `sample.<resolution>.mp4` files
-- `DB_DIRECTORY`: SQLite cache database directory
+- `EXAMPLES_DIRECTORY`: Example configuration copied into an empty configuration directory on first start
+- `DB_DIRECTORY`: SQLite cache database directory (default: the system temp directory; mount it to keep the cache across restarts)
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
 - `LOG_COLORS`: Enable colored logs (true/false)
+
+Credential values in URLs and parameter maps (`apikey`, `api_key`, `token`, `password`, ...) are masked in the log output.
 
 Module settings may be overridden through environment variables. See `docs/CONFIGURATION.md` for current behavior and known limitations.
 

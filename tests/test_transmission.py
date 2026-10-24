@@ -117,6 +117,7 @@ def test_put_prepares_magnet_and_http_torrents(monkeypatch) -> None:
     }
 
     class Download:
+        is_redirect = False
         content = b"d8:announce-test"
         headers = {"Content-Type": "application/x-bittorrent"}
 
@@ -147,3 +148,52 @@ def test_put_marks_rpc_failure_as_error() -> None:
 
     assert client.put(data) == data
     assert data[0]["transmission_status"] == "error"
+
+
+def test_http_link_redirecting_to_magnet_uses_the_magnet(monkeypatch) -> None:
+    """Jackett download links may redirect to a magnet URI instead of a file."""
+    client = transmission()
+    client.cfg = Mock(side_effect=lambda key, default=None: default)
+    calls = []
+
+    class Redirect:
+        is_redirect = True
+        headers = {"Location": "magnet:?xt=urn:btih:abc"}
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs["allow_redirects"]))
+        return Redirect()
+
+    monkeypatch.setattr("cineflow.integrations.transmission.requests.get", fake_get)
+
+    assert client._prepare_params({"title": "Film", "link": "https://jackett/dl/1"}) == {
+        "filename": "magnet:?xt=urn:btih:abc"
+    }
+    assert calls == [("https://jackett/dl/1", False)]
+
+
+def test_endless_redirects_mark_the_item_as_error(monkeypatch) -> None:
+    client = transmission()
+    client.cfg = Mock(side_effect=lambda key, default=None: default)
+
+    class Redirect:
+        is_redirect = True
+        headers = {"Location": "/again"}
+
+    monkeypatch.setattr("cineflow.integrations.transmission.requests.get", lambda url, **kwargs: Redirect())
+    media = {"title": "Film", "link": "https://jackett/dl/1"}
+
+    assert client._prepare_params(media) is None
+    assert media["transmission_status"] == "error"
+
+
+def test_session_is_opened_on_first_rpc_request() -> None:
+    """Construction never talks to Transmission; the first request opens the session."""
+    client = transmission()
+    client._session_id = None
+    client._get_session_id = Mock(return_value="first-session")
+    client._handler.post.return_value = response(200, {"arguments": {}, "result": "success"})
+
+    assert client._rpc_request("torrent-get") == {"result": "success"}
+    client._get_session_id.assert_called_once_with()
+    assert client._handler.post.call_args.kwargs["headers"] == {"X-Transmission-Session-Id": "first-session"}

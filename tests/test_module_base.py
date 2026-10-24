@@ -77,3 +77,27 @@ def test_module_required_configuration_is_enforced() -> None:
 
     with pytest.raises(ValueError, match="Missing required"):
         RequiredModule()
+
+
+def test_module_omits_empty_optional_properties_so_later_steps_can_fill_them() -> None:
+    module = SampleModule()
+
+    assert module.map({"name": "Film", "release_year": 2024, "imdb": None}) == {"title": "Film", "year": 2024}
+
+
+def test_module_keeps_empty_properties_when_allowed() -> None:
+    module = SampleModule()
+    module.empty_property_allowed = True
+
+    assert module.map({"name": "Film", "release_year": 2024, "imdb": None}) == {
+        "title": "Film", "year": 2024, "imdbid": None,
+    }
+
+
+def test_module_uses_the_first_alias_with_a_value() -> None:
+    module = SampleModule()
+    module.mappings = {"title": ["name"], "year": ["release_year"], "link": ["Link", "MagnetUri"]}
+
+    assert module.map({"name": "Film", "release_year": 2024, "Link": None, "MagnetUri": "magnet:?x"}) == {
+        "title": "Film", "year": 2024, "link": "magnet:?x",
+    }

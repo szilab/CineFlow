@@ -7,7 +7,7 @@ from cineflow.core.logger import log
 from cineflow.core.config import Config, cfg
 from cineflow.utils.misc import sanitize_name
 from cineflow.utils.request import RequestHandler
-from cineflow.utils.directory import DirectoryHandler
+from cineflow.utils.directory import CleanupScheduler, DirectoryHandler
 
 
 def _merge_config(base: dict, override: dict) -> dict:
@@ -45,18 +45,20 @@ class ModuleBase():
         return Config.getfrom(self._cfg, key=key, module=self.name, default=default)
 
     def map(self, item: dict) -> dict:
-        """Interpret the received item as the data structure."""
+        """Interpret the received item as the data structure.
+
+        Only title and year are mandatory. Optional properties without a value
+        are left out, so a later flow step (for example ``enrich``) can fill them.
+        """
         data = self._map_props(item=item)
         # all items must have a title and year
         if not data.get('title') or not data.get('year'):
             log(f"Item missing required fields: {item}")
             return {}
-        # validate empty properties
         if not self._empty_property_allowed:
-            for key, value in data.items():
-                if value is None:
-                    log(f"Empty property '{key}' not allowed in {self.name} module.")
-                    return {}
+            for key in [key for key, value in data.items() if value is None]:
+                log(f"Empty property '{key}' omitted in {self.name} module.")
+                del data[key]
         return data
 
     def _map_props(self, item: dict) -> dict:
@@ -66,19 +68,15 @@ class ModuleBase():
             return {}
         data = {}
         for prop, aliases in self._data_mappings.items():
-            # map the property if the name matches
-            if prop in item:
-                data[prop] = item[prop]
-            else:
-                # maps the property if the alias matches
-                for alias in aliases:
-                    if alias in item:
-                        data[prop] = item[alias]
-                        break
+            # the property name wins, then the first alias that carries a value
+            candidates = [key for key in (prop, *aliases) if key in item]
+            if not candidates:
+                continue
+            key = next((key for key in candidates if item[key] is not None), candidates[0])
+            data[prop] = item[key]
             # apply any data transformations
             if prop in self._data_transforms and data.get(prop):
-                prop_val = self._data_transforms[prop](data[prop])
-                data[prop] = prop_val
+                data[prop] = self._data_transforms[prop](data[prop])
         return data
 
     @property
@@ -227,7 +225,7 @@ class ConsumerBase(ModuleBase, ABC):
                     match = True
                     log(f"Item '{d.get('title')}' ({d.get('year')}) [{d.get('tmdbid')}] is match on {operation}.")
                     break
-                if d.get('title') == r.get('title') and d.get('year') == r.get('year'):
+                if d.get('title') == r.get('title') and str(d.get('year')) == str(r.get('year')):
                     match = True
                     log(f"Item '{d.get('title')}' ({d.get('year')}) is match on {operation}.")
                     break
@@ -294,6 +292,90 @@ class ConsumerBase(ModuleBase, ABC):
         self._limit = max(value, 10)
 
 
+class MediaServerBase(ConsumerBase, ABC):
+    """Shared query and inverse logic of media server modules."""
+
+    ID_KEY = ''         # mapped item ID used to de-duplicate results
+    LIBRARY_KEY = ''    # server query key that selects one library
+
+    def get(self, query: Any = None) -> List[dict] | None:
+        """Collect media; ``isInverse`` returns the items outside the query."""
+        input_items = query if isinstance(query, list) else []
+        query = self._parse_query(query)
+        results = None
+        if query.get("isInverse"):
+            del query["isInverse"]
+            inverse_query = self._inverse_query(query)
+            q_items = self._get_items(query=query)
+            if q_items is not None:
+                results = self._inverse_items(query_items=input_items or q_items, query=inverse_query)
+        else:
+            results = self._get_items(query=query)
+        if results is None:
+            return None
+        return list({item[self.ID_KEY]: item for item in results if item.get(self.ID_KEY)}.values())
+
+    def search(self, media: dict) -> dict:
+        """Search media for the given title."""
+        return self.match(results=self._get_items(), media=media)
+
+    def _parse_query(self, query: Any) -> dict:
+        """Normalize a step query and resolve ``parentLibrary`` to the server key."""
+        if not query or isinstance(query, list):
+            return {}
+        if isinstance(query, str):
+            return {"searchTerm": query}
+        if not isinstance(query, dict):
+            raise ValueError(f"{self.__class__.__name__} 'query' must be a string or a dictionary.")
+        query = dict(query)
+        if library := query.pop("parentLibrary", None):
+            if library not in self._libraries():
+                raise ValueError(f"Library '{library}' not found in {self.__class__.__name__}.")
+            query[self.LIBRARY_KEY] = self._libraries()[library]
+        return query
+
+    def _inverse_query(self, query: dict) -> dict:  # pylint: disable=unused-argument
+        """Return the query that selects the full library for an inverse result."""
+        return {}
+
+    @abstractmethod
+    def _libraries(self) -> dict:
+        """Return the server libraries by name."""
+
+    @abstractmethod
+    def _get_items(self, query: dict = None) -> List[dict] | None:
+        """Return the mapped items matching the query, or None on failure."""
+
+    @abstractmethod
+    def _inverse_items(self, query_items: List[dict], query: dict = None) -> List[dict] | None:
+        """Return the library items that are not in the query items."""
+
+
+class TorrentClientBase(ConsumerBase, ABC):
+    """Shared behavior of download client modules."""
+
+    def search(self, media: dict) -> dict:
+        """Search media for the given title in the torrent list."""
+        results = self.get(query=sanitize_name(name=media.get('title')))
+        if match := self.match(results=results, media=media):
+            return match
+        if media.get('alttitle'):
+            results = self.get(query=sanitize_name(name=media.get('alttitle')))
+            return self.match(results=results, media=media)
+        return None
+
+    def _map_torrents(self, items: list, query: Any = None) -> List[Dict]:
+        """Map torrents and keep the ones whose title contains the query."""
+        results = []
+        for item in items:
+            media = self.map(item=item)
+            if media and (not query or query in sanitize_name(name=media.get('title'))):
+                results.append(media)
+            else:
+                log(f"Skipping item '{item.get('name')}' invalid or not match.", level='DEBUG')
+        return results
+
+
 class LibraryBase(ModuleBase):
     """Library module base class."""
 
@@ -304,3 +386,4 @@ class LibraryBase(ModuleBase):
         self._handler = DirectoryHandler(directory=directory)
         self._handler.max_item_count = self.cfg("limit", 500)
         self._handler.max_item_age = self.cfg("age", 120)
+        CleanupScheduler.schedule(self._handler)

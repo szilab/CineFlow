@@ -37,9 +37,9 @@ class RequestHandler:
         self._cache_handler = CacheHandler(cache_time=0)
         self._ok_statuses = {200, 201, 202, 204}  # HTTP OK statuses
 
-    def get(self, endpoint: str, **kwargs) -> RequestResponse:
-        """Make a GET request"""
-        return self._do('GET', endpoint=endpoint, **kwargs)
+    def get(self, endpoint: str, cache_time: int | None = None, **kwargs) -> RequestResponse:
+        """Make a GET request, optionally with its own cache time in seconds."""
+        return self._do('GET', endpoint=endpoint, cache_time=cache_time, **kwargs)
 
     def post(self, endpoint: str, data: dict, **kwargs) -> RequestResponse:
         """Make a POST request"""
@@ -49,13 +49,13 @@ class RequestHandler:
         """Make a PUT request"""
         return self._do('PUT', endpoint, data=data, **kwargs)
 
-    def _do(self, method: str, endpoint: str, **kwargs) -> RequestResponse:
+    def _do(self, method: str, endpoint: str, cache_time: int | None = None, **kwargs) -> RequestResponse:
         full_url = f"{self._url}/{endpoint.lstrip('/')}"
         # merge default headers with user headers without overwriting critical keys
         kwargs['params'] = {**self._params, **kwargs.get("params", {})}
         kwargs['headers'] = {**self._headers, **kwargs.get("headers", {})}
         # return cached response if available
-        cached = self._cache_handler.read(method, full_url, **kwargs)
+        cached = self._cache_handler.read(method, full_url, cache_time=cache_time, **kwargs)
         if cached is not None:
             return RequestResponse(data=cached, status=200, cookies={}, headers={})
         # respect API rate limits
@@ -89,7 +89,7 @@ class RequestHandler:
         except JSONDecodeError:
             log(f"Response is not JSON: {response.text}")
             data = response.text.strip()
-        self._cache_handler.write(method, url=full_url, resp_data=data, **kwargs)
+        self._cache_handler.write(method, url=full_url, resp_data=data, cache_time=cache_time, **kwargs)
         return RequestResponse(
             data=data,
             status=response.status_code,
@@ -162,19 +162,22 @@ class CacheHandler:
         key = f"{method}:{url}:{kwargs}"
         return hashlib.md5(key.encode()).hexdigest()
 
-    def read(self, method: str, url: str, **kwargs) -> Any | None:
+    def _effective_time(self, cache_time: int | None) -> int:
+        return self.cache_time if cache_time is None else cache_time
+
+    def read(self, method: str, url: str, cache_time: int | None = None, **kwargs) -> Any | None:
         """Read cached response from the database."""
-        if self.cache_time <= 0:
+        if (expire := self._effective_time(cache_time)) <= 0:
             return None
         rhash = self._hash(method, url, kwargs)
-        return self._db.get_request(rhash=rhash, expire=self.cache_time)
+        return self._db.get_request(rhash=rhash, expire=expire)
 
-    def write(self, method: str, url: str, resp_data: Any, **kwargs) -> None:
+    def write(self, method: str, url: str, resp_data: Any, cache_time: int | None = None, **kwargs) -> None:
         """Write response to the cache."""
-        if self.cache_time <= 0:
+        if (expire := self._effective_time(cache_time)) <= 0:
             return
         rhash = self._hash(method, url, kwargs)
-        self._db.store_request(rhash=rhash, data=resp_data)
+        self._db.store_request(rhash=rhash, data=resp_data, expire=expire)
 
 
 class RateLimiter:  # pylint: disable=too-few-public-methods
