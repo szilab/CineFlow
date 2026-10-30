@@ -16,8 +16,15 @@ datas += [
     for filename in ("config.yaml", "from_lib.yaml", "to_lib.yaml")
 ]
 
+datas += [
+    (str(path), str(path.parent.relative_to(PROJECT_ROOT)))
+    for path in (PROJECT_ROOT / "cineflow" / "web" / "static").iterdir()
+    if path.is_file()
+]
+
 hiddenimports = collect_submodules("cineflow.integrations")
 hiddenimports += collect_submodules("cineflow.internal")
+hiddenimports += collect_submodules("cineflow.web")
 
 a = Analysis(
     [str(PROJECT_ROOT / "cineflow" / "main.py")],

@@ -17,6 +17,8 @@ Key principles:
 
 ## Phase 1 — Configuration Model and Validation
 
+**Status:** implemented — module definitions, structured validation, `cineflow validate` ([GUI.md](GUI.md)).
+
 Goal: make configuration safe, discoverable, and machine-validatable before building the GUI on top of it.
 
 ### Planned work
@@ -50,6 +52,8 @@ cineflow validate
 The command should validate global configuration and all workflow files without starting workers.
 
 ## Phase 2 — First-Party Configuration GUI
+
+**Status:** first version implemented — module manager with named instances and connection tests, card-based flow editor, runtime view ([GUI.md](GUI.md)). Also done: optional sign-in (password, OIDC SSO, proxy header), drag-and-drop action palette, test runs without side effects. Open: branching/visual connections, raw YAML editing in the browser.
 
 Goal: remove YAML editing as a requirement for normal users.
 
@@ -115,6 +119,8 @@ Radarr must remain optional. Existing direct Jackett → Transmission workflows 
 ### Sonarr module
 
 Optional workflow integration for TV/series acquisition and management.
+
+Basic series support already exists without Sonarr: every module accepts `kind: tv` (TMDb shows, Jackett season packs, Jellyfin/Plex series, series library export).
 
 Possible actions mirror the Radarr integration where appropriate.
 

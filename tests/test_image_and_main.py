@@ -73,6 +73,9 @@ def test_main_initializes_shuts_down_and_entrypoint(monkeypatch) -> None:
     ]
 
     class SignalApp:
+        def __init__(self, web_port=None):
+            calls.append(f"web:{web_port}")
+
         def run(self):
             calls.append("run")
 

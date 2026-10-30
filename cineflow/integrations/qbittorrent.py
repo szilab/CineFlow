@@ -4,8 +4,11 @@ from http.cookies import SimpleCookie
 from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Dict, List
 from cineflow.core.bases.module import TorrentClientBase
+from cineflow.core.schema import (
+    ModuleDefinition, ActionDefinition, Field, KIND, INPUT_DATA, INPUT_QUERY, consumer_actions,
+)
 from cineflow.core.logger import log
-from cineflow.utils.misc import media_title, media_year
+from cineflow.utils.misc import release_parsers
 
 
 class QBittorrent(TorrentClientBase):
@@ -22,6 +25,28 @@ class QBittorrent(TorrentClientBase):
     """
 
     FORM_HEADERS = {'Content-Type': 'application/x-www-form-urlencoded'}
+    DEFINITION = ModuleDefinition(
+        id='qbittorrent', label='qBittorrent', category='download client', connection_test=True,
+        description="qBittorrent BitTorrent client (WebAPI).",
+        fields=(
+            Field('url', 'url', 'URL', "qBittorrent WebUI URL, e.g. http://qbittorrent:8080.",
+                  required=True),
+            Field('username', 'string', 'Username'),
+            Field('password', 'secret', 'Password'),
+            Field('directory', 'string', 'Download directory',
+                  "Download directory on the client's machine.", step=True),
+            KIND,
+            Field('category', 'string', 'Category', step=True),
+            Field('tags', 'string', 'Tags', "Comma-separated tags.", step=True),
+        ),
+        actions=(
+            ActionDefinition('get', 'Get torrents', "List the torrents of the client.",
+                             input=INPUT_QUERY, retrieval=True),
+            ActionDefinition('put', 'Add torrents', "Add the item release links to the client.",
+                             input=INPUT_DATA, side_effects=True),
+            *consumer_actions('qBittorrent')[1:4],
+        ),
+    )
 
     def __init__(self, config: dict = None) -> None:
         super().__init__(config=config)
@@ -31,16 +56,13 @@ class QBittorrent(TorrentClientBase):
         self._sid = None
         self._auth_cookies = {}
         self._headers = {'Referer': self._referer(), 'Origin': self._origin()}
+        release_mappings, release_transforms = release_parsers(kind=self._kind, source='name')
         self._data_mappings = {
-            'title': ['name'],
-            'year': ['name'],
+            **release_mappings,
             'status': ['state'],
             'percent_done': ['progress'],
         }
-        self._data_transforms = {
-            'title': media_title,
-            'year': media_year,
-        }
+        self._data_transforms = release_transforms
         # login happens on the first API request, not at construction time
 
     def get(self, query: Any = None) -> List[Dict] | None:
@@ -67,6 +89,13 @@ class QBittorrent(TorrentClientBase):
                 response = self._api_request('POST', 'api/v2/torrents/add', data=params, form=True)
                 self._handle_response(media=media, response=response)
         return data
+
+    def check_connection(self) -> dict:
+        """Test the WebAPI login and a version request."""
+        version = self._api_request('GET', 'api/v2/app/version')
+        if version is None:
+            return {'ok': False, 'message': 'qBittorrent WebAPI request failed.'}
+        return {'ok': True, 'message': f'Connected to qBittorrent {version}.'}
 
     def _prepare_params(self, media: dict) -> dict | None:
         """Prepare qBittorrent torrent-add form parameters."""

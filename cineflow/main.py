@@ -1,7 +1,10 @@
 """CineFlow application and command-line entry point."""
 
 import argparse
+import json
+import os
 import signal
+import sys
 import threading
 from collections.abc import Sequence
 from cineflow import __version__
@@ -16,7 +19,7 @@ from cineflow.utils.directory import CleanupScheduler
 class MainApp:
     """Class to manage the application lifecycle"""
 
-    def __init__(self):
+    def __init__(self, web_port: int | None = None):
         """Initialize the application"""
         log("Application started", level="MSG")
         self._components = []
@@ -27,7 +30,12 @@ class MainApp:
             self._components.append(Database())
             self._components.append(CleanupScheduler())
             log("Start FlowManager", level="MSG")
-            self._components.append(FlowManager())
+            flow_manager = FlowManager()
+            self._components.append(flow_manager)
+            if web_port is not None:
+                from cineflow.web.server import WebServer  # pylint: disable=import-outside-toplevel
+
+                self._components.append(WebServer(port=web_port, flow_manager=flow_manager))
         except Exception as e:
             log(f"Error during initialization: {e}", level="ERROR")
             raise
@@ -64,18 +72,107 @@ class MainApp:
         log("Application shutdown complete", level="INFO")
 
 
-def _parse_args(argv: Sequence[str] | None = None) -> None:
-    """Parse informational command-line options before runtime initialization."""
+def _web_port(value: str | None) -> int | None:
+    """Return the web GUI port, None when the GUI is disabled."""
+    if value in (None, ''):
+        return None
+    port = int(value)
+    if not 0 <= port <= 65535:
+        raise ValueError(f"Invalid web port {port}.")
+    return port
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line options before runtime initialization."""
     parser = argparse.ArgumentParser(description="CineFlow media automation worker")
     parser.add_argument("--version", action="version", version=f"CineFlow {__version__}")
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--web-port", default=os.environ.get("CINEFLOW_WEB_PORT"),
+        help="serve the web GUI on this port (default: $CINEFLOW_WEB_PORT, disabled when unset)",
+    )
+    commands = parser.add_subparsers(dest="command")
+    validate = commands.add_parser(
+        "validate", help="validate config.yaml and every flow without running anything",
+    )
+    validate.add_argument("--json", action="store_true", help="print the issues as JSON")
+    commands.add_parser(
+        "hash-password", help="print a hash for CINEFLOW_AUTH_PASSWORD_HASH (reads the password from stdin)",
+    )
+    return parser.parse_args(argv)
+
+
+def hash_password_command() -> int:
+    """Ask for a password and print its hash."""
+    # pylint: disable=import-outside-toplevel
+    import getpass
+    from cineflow.web.auth import hash_password
+
+    if sys.stdin.isatty():
+        password = getpass.getpass("Password: ")
+        if password != getpass.getpass("Repeat: "):
+            print("The passwords differ.", file=sys.stderr)
+            return 1
+    else:
+        password = sys.stdin.readline().rstrip("\n")
+    if len(password) < 8:
+        print("Use at least 8 characters.", file=sys.stderr)
+        return 1
+    print(hash_password(password))
+    return 0
+
+
+def _read_config_file():
+    """Read config.yaml for validation without creating it; return (config, issues)."""
+    # pylint: disable=import-outside-toplevel
+    import yaml
+    from cineflow.core import store, validation
+    from cineflow.runtime import config_directory
+
+    config_file = config_directory() / store.CONFIG_FILE
+    try:
+        config = yaml.safe_load(config_file.read_text(encoding='utf-8')) if config_file.is_file() else {}
+    except (OSError, yaml.YAMLError) as exc:
+        return {}, [validation.error((), f"Cannot read: {exc}", 'yaml')]
+    return config or {}, validation.validate_config(config)
+
+
+def validate_command(as_json: bool = False) -> int:
+    """Validate the configuration and flows; return the process exit code."""
+    # pylint: disable=import-outside-toplevel
+    from cineflow.core import store, validation
+    from cineflow.core.schema import has_errors
+
+    config, config_issues = _read_config_file()
+    report = {'config.yaml': config_issues}
+    config = config if isinstance(config, dict) else {}
+    for path in store.flow_files():
+        try:
+            report[path.name] = validation.validate_flow(store.read_flow(path.stem), config)
+        except store.StoreError as exc:
+            report[path.name] = [validation.error((), str(exc), 'yaml')]
+    if as_json:
+        print(json.dumps({name: [issue.to_dict() for issue in issues] for name, issues in report.items()}, indent=2))
+    else:
+        for name, issues in report.items():
+            print(f"{name}: {'FAILED' if has_errors(issues) else 'ok'}")
+            for issue in issues:
+                print(f"  {issue}")
+    return 1 if any(has_errors(issues) for issues in report.values()) else 0
 
 
 def main(argv: Sequence[str] | None = None):
-    """Run the long-lived CineFlow worker."""
-    _parse_args(argv)
+    """Run the long-lived CineFlow worker, or a one-off command."""
+    args = _parse_args(argv)
+    if args.command == "validate":
+        sys.exit(validate_command(as_json=args.json))
+    if args.command == "hash-password":
+        sys.exit(hash_password_command())
+    try:
+        web_port = _web_port(args.web_port)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid web port: {exc}") from exc
     bootstrap_configuration()
-    app = MainApp()
+    app = MainApp(web_port=web_port)
 
     def shutdown(_signum, _frame):
         app.shutdown()

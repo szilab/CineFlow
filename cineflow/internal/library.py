@@ -6,6 +6,9 @@ from cineflow.core.logger import log
 from cineflow.utils.misc import evaluate, fix_imdbid, search_preference_score
 from cineflow.utils.image import ImageHandler
 from cineflow.core.bases.module import LibraryBase
+from cineflow.core.schema import (
+    ModuleDefinition, ActionDefinition, Field, KIND, SEARCH_PREFERENCE, INPUT_DATA, INPUT_NONE,
+)
 
 
 class Library(LibraryBase):
@@ -17,6 +20,7 @@ class Library(LibraryBase):
         - limit: number of maximum items in library (default: 500, minimum: 10)
         - age: maximum age of items in library in days (default: 120, minimum: 30)
         - search_preference: release name preferences used to rank releases (optional)
+        - kind: 'movie' (default) or 'tv'; series get a 'Season NN' folder
 
     Functions:
         - get: list the media in the library
@@ -25,6 +29,30 @@ class Library(LibraryBase):
 
     Items exceeding the limits are removed by a background cleanup worker.
     """
+
+    DEFINITION = ModuleDefinition(
+        id='library', label='Library', category='internal',
+        description="Exported placeholder library that a media server can scan.",
+        fields=(
+            Field('directory', 'path', 'Directory', "Library folder inside EXPORT_DIRECTORY.",
+                  required=True, step=True),
+            Field('limit', 'integer', 'Item limit', "Maximum number of items kept.",
+                  default=500, minimum=10, step=True),
+            Field('age', 'integer', 'Maximum age (days)', "Older items are removed.",
+                  default=120, minimum=30, step=True),
+            KIND, SEARCH_PREFERENCE,
+            Field('rules', 'list', 'Poster rules',
+                  "Poster modification rules (list of mappings).", advanced=True),
+        ),
+        actions=(
+            ActionDefinition('get', 'Get library items', "List the exported items.",
+                             input=INPUT_NONE, retrieval=True),
+            ActionDefinition('put', 'Export to library', "Export items with posters to the library.",
+                             input=INPUT_DATA, side_effects=True),
+            ActionDefinition('remove', 'Remove from library', "Delete the items from the library.",
+                             input=INPUT_DATA, output='none', destructive=True),
+        ),
+    )
 
     def __init__(self, config: dict = None) -> None:
         """Initialize the library module."""
@@ -35,6 +63,7 @@ class Library(LibraryBase):
             'year': ['year'],
             'tmdbid': ['tmdbid'],
             'imdbid': ['imdbid'],
+            'season': ['season'],
         }
         self.transforms = {
             'tmdbid': lambda x: int(x) if x else None,
@@ -46,11 +75,11 @@ class Library(LibraryBase):
         results = []
         directories = self._handler.all()
         for directory in directories:
-            if '(' not in directory.name or ')' not in directory.name:
+            if not self._valid_item_name(directory.name):
                 log(f"Item '{directory.name}' does not have a valid name format.", level='WARNING')
                 continue
             media = self._handler.imprt(item=directory.name)
-            if not media or not media.get('title') or not media.get('year'):
+            if not media or not media.get('title') or (self.kind != 'tv' and not media.get('year')):
                 log(f"Item '{directory.name}' not found in library.", level='WARNING')
                 results.append({'directory': directory.name})
             else:
@@ -94,6 +123,7 @@ class Library(LibraryBase):
                     media=export_media,
                     image=image,
                     resolution=media.get('resolution'),
+                    kind=self.kind,
                 ):
                     media['directory'] = item
             else:
@@ -115,9 +145,19 @@ class Library(LibraryBase):
 
     def _item_name(self, media: dict, key: str = 'title') -> str:
         """Generate a library item name for the media."""
+        name = media[key]
+        # series parsed from release names may have no year
+        if media.get('year') or self.kind != 'tv':
+            name += " (" + str(media['year']) + ")"
         if media.get('tmdbid'):
-            return media[key] + " (" + str(media['year']) + f") [tmdbid-{media['tmdbid']}]"
-        return media[key] + " (" + str(media['year']) + ")"
+            name += f" [tmdbid-{media['tmdbid']}]"
+        return name
+
+    def _valid_item_name(self, name: str) -> bool:
+        """Return whether a directory name looks like an exported item."""
+        if '(' in name and ')' in name:
+            return True
+        return self.kind == 'tv' and '[tmdbid-' in name and name.endswith(']')
 
     def _matching_items(self, media: dict) -> List[Dict]:
         """Find existing records with the same TMDb or IMDb identity."""

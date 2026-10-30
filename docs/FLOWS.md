@@ -2,7 +2,7 @@
 
 CineFlow behavior is defined through workflows (“flows”). A flow is an ordered set of module/action steps executed periodically by the background runtime.
 
-The current authoring format is YAML. The planned visual editor will read and write the same flow model so manually authored and GUI-authored workflows remain fully compatible.
+Flows are YAML files. The web GUI's visual editor ([GUI.md](GUI.md)) reads and writes the same files, so hand-written and GUI-made flows are fully compatible.
 
 ## 1. Overview
 
@@ -68,6 +68,8 @@ steps:
 | Property | Type | Description |
 |---|---|---|
 | `name` | string | human-readable flow name |
+| `description` | string | optional free text (ignored by the runtime) |
+| `version` | integer | optional revision counter maintained by the GUI |
 | `enabled` | boolean | whether the flow is runnable |
 | `delay` | integer | delay in minutes between executions |
 | `priority` | integer | execution ordering in sequential mode |
@@ -80,6 +82,7 @@ A normal step contains:
 ```yaml
 - name: Descriptive step name
   module: module_name
+  instance: instance_id   # optional named module instance
   action: action_name
   input: previous
   config:
@@ -87,6 +90,9 @@ A normal step contains:
 ```
 
 The module determines which actions are available and what configuration they accept.
+`instance` selects a named module instance from `config.yaml`; without it the
+module default is used (see [CONFIGURATION.md](CONFIGURATION.md#module-instances)).
+Step names must be unique because later steps refer to them.
 
 Current examples include actions such as:
 
@@ -140,6 +146,16 @@ input:
 ```yaml
 input:
   data: previous
+  query:
+    parentLibrary: "Trending Filmek"
+```
+
+In a structured input `data` may also be a named reference or a list of step
+names to merge:
+
+```yaml
+input:
+  data: "{{Collect trending movies}}"
   query:
     parentLibrary: "Trending Filmek"
 ```
@@ -231,6 +247,42 @@ steps:
     input: previous
 ```
 
+### TV series example
+
+```yaml
+name: series-favorites-download
+enabled: true
+delay: 30
+steps:
+  - name: Collect Jellyfin series favorites
+    module: jellyfin
+    action: get
+    config:
+      kind: tv
+    input:
+      query:
+        isFavorite: true
+        allUsers: true
+  - name: Normalize titles with TMDb
+    module: tmdb
+    action: enrich
+    input: previous
+    config:
+      kind: tv
+      must_match: true
+  - name: Find season pack
+    module: jackett
+    action: enrich
+    input: previous
+    config:
+      kind: tv
+      must_match: true
+  - name: Download
+    module: transmission
+    action: put
+    input: previous
+```
+
 ### TMDb discovery → exported library
 
 ```text
@@ -252,84 +304,40 @@ Radarr, Sonarr, Trakt, and Simkl are planned optional modules, not mandatory arc
 
 ## 10. Validation
 
-Current validation checks the basic flow structure and runtime module configuration. The roadmap expands this into a shared preflight validation system.
-
-Planned validation includes:
-
-- workflow root structure;
-- `enabled`, `delay`, and `priority` types/ranges;
-- module existence;
-- action existence;
-- action/module configuration;
-- duplicate or invalid step names;
-- named step references;
-- supported input shapes;
-- action input/output compatibility where practical.
-
-Validation results should be structured enough for both CLI and GUI use.
-
-A planned non-destructive command is conceptually:
-
 ```text
 cineflow validate
 ```
 
-It should validate configuration and workflows without starting workers or performing workflow actions.
+validates `config.yaml` and every flow without starting workers or performing
+actions. It checks the flow root keys and value ranges, module and action
+existence, module instances, required module settings (including environment
+overrides), step settings, duplicate step names, `{{name}}` references to
+earlier steps, and the input shapes each action accepts. The runtime logs the
+same findings as warnings when it loads a flow file. Details: [GUI.md](GUI.md#validation).
 
 ## 11. Visual Workflow Editor
 
-The main usability roadmap item is a first-party drag-and-drop flow editor.
-
-The editor should not introduce a second workflow representation. It should manipulate the same logical structure represented by YAML.
-
-Expected UX:
-
-1. Create/select a workflow.
-2. Browse available modules and actions.
-3. Drag an action node into the workflow.
-4. Configure the node using module-provided metadata.
-5. Connect/select its input source.
-6. Reorder nodes.
-7. See validation errors immediately.
-8. Save/export standard CineFlow YAML.
-
-Example visual representation:
+The web GUI contains a card-based editor that manipulates the same YAML
+structure: add actions from a catalog generated from module definitions,
+drag cards to reorder, configure each step in a side panel, see validation
+errors on cards and fields, save, export/import YAML and run a flow manually.
+Flows with errors can only be saved disabled. See [GUI.md](GUI.md).
 
 ```text
-[TMDb: get]
+[TMDb: Get]
      |
      v
-[Jackett: enrich]
+[Jackett: Enrich]
      |
      v
-[Transmission: put]
+[Transmission: Add torrents]
 ```
-
-or, with future modules:
-
-```text
-[Trakt: watchlist]
-     |
-     v
-[Radarr: put]
-```
-
-The editor should expose only valid actions/configuration for the selected module whenever metadata is available.
 
 ## 12. Workflow Runtime View
 
-The GUI should gradually expose runtime state for each workflow:
-
-- enabled/disabled;
-- running/idle;
-- last execution time;
-- next due time;
-- last success/failure;
-- current or last failing step;
-- manual run where safe;
-- recent execution messages.
-
-This is observability for the existing flow engine, not a separate job-processing system.
+The GUI shows, per flow: enabled state, running/idle, last start and end,
+last result, the failing step and error, the next due time in sequential
+mode, recent log messages of the flow, and a manual *Run now* trigger.
 
 ## 13. Design Constraints
 

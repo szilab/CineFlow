@@ -5,10 +5,27 @@ import os
 from pathlib import Path
 from typing import List, Dict
 from cineflow.core.logger import log
+from cineflow.core.schema import ModuleDefinition, ActionDefinition, Field, INPUT_DATA, INPUT_NONE
+
+FILENAME = Field('filename', 'string', 'File name', "File in DEBUG_DIRECTORY.", default='exported_data.json')
 
 
 class Tools():  # pylint: disable=too-few-public-methods
     """Tools module class"""
+
+    DEFINITION = ModuleDefinition(
+        id='tools', label='Tools', category='internal',
+        description="Data helpers: de-duplication and debug export/import.",
+        actions=(
+            ActionDefinition('remove_duplicates', 'Remove duplicates',
+                             "Drop items with an already seen IMDb ID, TMDb ID or title and year.",
+                             input=INPUT_DATA),
+            ActionDefinition('data_export', 'Export data', "Write the items to a JSON file.",
+                             input=INPUT_DATA, output='none', arguments=(FILENAME,), side_effects=True),
+            ActionDefinition('data_import', 'Import data', "Read items from a JSON file.",
+                             input=INPUT_NONE, arguments=(FILENAME,)),
+        ),
+    )
 
     def __init__(self, config: dict = None) -> None:
         """Initialize the module."""

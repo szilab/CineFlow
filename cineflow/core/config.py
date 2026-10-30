@@ -53,6 +53,24 @@ class Config(metaclass=SingletonMeta):
                 leaf[key.split(".")[-1]] = value
             self._save(config)
 
+    def data(self) -> dict:
+        """Return a copy of the whole configuration."""
+        with self._lock:
+            return copy.deepcopy(self._load())
+
+    def replace(self, data: dict) -> None:
+        """Replace the whole configuration, keeping a backup of the old file."""
+        if not isinstance(data, dict):
+            raise ValueError("The configuration must be a mapping.")
+        from cineflow.core.store import write_text  # pylint: disable=import-outside-toplevel
+
+        with self._lock:
+            write_text(
+                Path(self._file),
+                yaml.safe_dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False),
+            )
+            self._last_valid = copy.deepcopy(data)
+
     def _load(self) -> dict:
         """Load configuration, keeping the last valid state when the file is broken."""
         name = os.path.basename(self._file)

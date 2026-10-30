@@ -13,6 +13,7 @@ ENV GID=1000 \
     MEDIA_DIRECTORY=/app/media \
     LOG_LEVEL=INFO \
     LOG_COLORS=false \
+    CINEFLOW_WEB_HOST=0.0.0.0 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
@@ -31,6 +32,9 @@ COPY docker/examples/*.* $EXAMPLES_DIRECTORY/
 COPY docker/media/ $MEDIA_DIRECTORY/
 
 VOLUME ["$CFG_DIRECTORY", "$EXPORT_DIRECTORY"]
+# the web GUI listens only when CINEFLOW_WEB_PORT is set, e.g. 8080;
+# it also needs CINEFLOW_AUTH (password, oidc, header, or none behind an authenticating proxy)
+EXPOSE 8080
 
 USER $IMAGE_USER
 # cineflow copies the examples into an empty configuration directory on first start

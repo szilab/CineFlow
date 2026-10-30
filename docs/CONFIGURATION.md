@@ -2,7 +2,7 @@
 
 CineFlow is configuration-driven. Core code provides reusable capabilities, while runtime behavior is assembled from module configuration and workflows.
 
-The current configuration format is YAML. YAML is intended to remain the portable source-of-truth format even after the first-party GUI is introduced.
+The configuration format is YAML, and it remains the source of truth: the optional web GUI ([GUI.md](GUI.md)) reads and writes the same files.
 
 ## Configuration Layers
 
@@ -21,8 +21,10 @@ CineFlow currently uses two configuration layers:
 Module settings use this precedence, from lowest to highest:
 
 ```text
-global module configuration < workflow step config < environment override
+module default < named instance < workflow step config < environment override
 ```
+
+Named instances are optional; see [Module Instances](#module-instances).
 
 Nested dictionaries from global and step configuration are merged recursively, so a step can override one nested setting without replacing unrelated global values.
 
@@ -307,7 +309,10 @@ Environment overrides are most suitable for simple scalar values. Nested keys an
 
 `config.yaml` is read by the configuration layer when values are requested, but module instances can retain merged configuration for their lifetime. Therefore, changing global module configuration while CineFlow is running is not currently guaranteed to update already-created module instances.
 
-For predictable operation, **restart CineFlow after changing global configuration**.
+For predictable operation, **restart CineFlow after editing `config.yaml` by hand**.
+Settings saved in the web GUI apply without a restart: every flow rebuilds its
+module objects at the next step. Changing the execution mode always needs a
+restart.
 
 If `config.yaml` becomes invalid while CineFlow is running (for example while it is
 being saved), CineFlow logs an error and keeps using the last valid configuration.
@@ -316,43 +321,62 @@ with an empty configuration.
 
 Workflow files themselves are monitored by the flow manager and can be reloaded when their content changes.
 
-## Validation Direction
+## Module Instances
 
-The current runtime performs validation in several places, including required module configuration and basic workflow structure. The roadmap extends this into a formal shared validation model.
+Each module section in `config.yaml` is the default configuration of that
+module. To use several servers of the same kind, add named instances:
 
-Planned validation metadata will allow each module to describe:
+```yaml
+instances:
+  living-room:
+    module: jellyfin
+    name: Living room Jellyfin
+    config:
+      url: http://living-room:8096
+      token: API_KEY
+```
 
-- available actions;
-- configuration fields;
-- required/optional fields;
-- value types;
-- defaults;
-- user-facing descriptions;
-- secret fields;
-- action input/output expectations where practical.
+A flow step selects one with `instance: living-room`. The instance inherits
+the module default, so only the differing values need to be set. Instance ids
+use lower-case letters, digits, `-` and `_`, and must differ from module
+names.
 
-The same validation contract should be consumed by:
+## TV Series
 
-- the runtime;
-- a non-destructive CLI validation command;
-- the first-party configuration GUI;
-- the visual workflow editor.
+Every module accepts `kind: movie` (default) or `kind: tv`, globally or per
+step. With `kind: tv`:
 
-This avoids maintaining separate validation rules for YAML and GUI-created configuration.
+- TMDb collects and searches TV shows (`/trending/tv`, `/search/tv`, ...);
+- Jackett searches the TV category (5000) by show title without the year and
+  parses release names such as `Show.S01E02`, `Show.2019.S03` or
+  `Show Season 2` into `title`, optional `year`, `season` and `episode`;
+  `season_pack_only` (default `true`) drops single-episode releases;
+- Jellyfin queries `Series` items, Plex queries shows;
+- Transmission and qBittorrent parse series names of their torrents;
+- the library exports `Show (Year) [tmdbid-N]/Season NN/Show SNNE01.mkv`, so a
+  media server recognizes the placeholder as a series.
 
-## Planned GUI
+A series item may have no year when it comes from a release name; title
+matching then ignores the unknown year. Use a separate library directory for
+series, for example `config: {directory: shows, kind: tv}` on the library
+steps. Mature episode tracking is better left to an optional Sonarr module
+(see the roadmap).
 
-The GUI will be a frontend for the same YAML configuration model, not a separate configuration database.
+## Validation
 
-Planned capabilities include:
+```bash
+cineflow validate          # exit code 1 when anything has errors
+cineflow validate --json
+```
 
-- list available modules;
-- generate configuration forms from module metadata;
-- validate global and module settings before saving;
-- identify required and secret fields;
-- provide optional safe connectivity checks;
-- edit runtime/global settings;
-- save valid configuration back to YAML;
-- expose advanced/raw YAML editing where useful.
+The command validates `config.yaml` and every flow without starting workers,
+contacting services or creating files. Every module declares its fields and
+actions, and the same validator serves the CLI, the runtime log and the GUI.
+See [GUI.md](GUI.md#validation) for the checks.
 
-For the workflow editor direction, see [FLOWS.md](FLOWS.md). For roadmap sequencing, see [ROADMAP.md](ROADMAP.md).
+## Web GUI
+
+Set `CINEFLOW_WEB_PORT` (and optionally `CINEFLOW_WEB_HOST`) to serve the web
+GUI. Optional sign-in with a local password, OIDC single sign-on or a trusted
+reverse-proxy header is configured with `CINEFLOW_AUTH`; on a non-loopback
+address the GUI does not start without it. Details in [GUI.md](GUI.md#authentication).

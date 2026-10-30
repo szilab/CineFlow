@@ -28,7 +28,8 @@ class FakeHandler:
     def exists(self, item):
         return item in self.items
 
-    def publish(self, item, media, image, resolution):
+    def publish(self, item, media, image, resolution, kind="movie"):
+        self.kinds = [*getattr(self, "kinds", []), kind]
         self.created.append((item, image, resolution))
         self.items[item] = dict(media)
         return True

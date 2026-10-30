@@ -5,8 +5,11 @@ from urllib.parse import urljoin
 from typing import List, Dict, Any
 import requests
 from cineflow.core.bases.module import TorrentClientBase
+from cineflow.core.schema import (
+    ModuleDefinition, ActionDefinition, Field, KIND, INPUT_DATA, INPUT_QUERY, consumer_actions,
+)
 from cineflow.core.logger import log
-from cineflow.utils.misc import media_title, media_year
+from cineflow.utils.misc import release_parsers
 
 
 class Transmission(TorrentClientBase):
@@ -20,6 +23,27 @@ class Transmission(TorrentClientBase):
     """
 
     MAX_REDIRECTS = 5
+    DEFINITION = ModuleDefinition(
+        id='transmission', label='Transmission', category='download client', connection_test=True,
+        description="Transmission BitTorrent client.",
+        fields=(
+            Field('url', 'url', 'URL', "Transmission base URL, e.g. http://transmission:9091.",
+                  required=True),
+            Field('username', 'string', 'Username'),
+            Field('password', 'secret', 'Password'),
+            Field('directory', 'string', 'Download directory',
+                  "Download directory on the client's machine.", step=True),
+            KIND,
+            Field('rpc_path', 'string', 'RPC path', default='transmission/rpc', advanced=True),
+        ),
+        actions=(
+            ActionDefinition('get', 'Get torrents', "List the torrents of the client.",
+                             input=INPUT_QUERY, retrieval=True),
+            ActionDefinition('put', 'Add torrents', "Add the item release links to the client.",
+                             input=INPUT_DATA, side_effects=True),
+            *consumer_actions('Transmission')[1:4],
+        ),
+    )
 
     def __init__(self, config: dict = None) -> None:
         super().__init__(config=config)
@@ -30,16 +54,13 @@ class Transmission(TorrentClientBase):
         self._auth = (username, password) if username else None
         # the RPC session is opened on the first request, not at construction time
         self._session_id = None
+        release_mappings, release_transforms = release_parsers(kind=self._kind, source='name')
         self._data_mappings = {
-            'title': ['name'],
-            'year': ['name'],
+            **release_mappings,
             'status': ['status'],
             'percent_done': ['percentDone'],
         }
-        self._data_transforms = {
-            'title': media_title,
-            'year': media_year,
-        }
+        self._data_transforms = release_transforms
 
     def get(self, query: Any = None) -> List[Dict] | None:
         """Get torrents from the Transmission API."""
@@ -65,6 +86,16 @@ class Transmission(TorrentClientBase):
                 response = self._rpc_request(method='torrent-add', params=params)
                 self._handle_response(media=media, response=response)
         return data
+
+    def check_connection(self) -> dict:
+        """Test the RPC session and credentials."""
+        try:
+            self._session_id = self._get_session_id()
+        except ValueError as exc:
+            return {'ok': False, 'message': str(exc)}
+        if self._rpc_request(method='session-get') is None:
+            return {'ok': False, 'message': 'Transmission RPC request failed.'}
+        return {'ok': True, 'message': 'Connected to Transmission RPC.'}
 
     def _prepare_params(self, media: dict) -> dict:
         """Prepare the parameters for the torrent add request."""

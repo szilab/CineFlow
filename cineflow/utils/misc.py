@@ -55,6 +55,83 @@ def media_year(title: str):
     return None
 
 
+MEDIA_KINDS = ('movie', 'tv')
+
+# "S01", "S01E02", "S01.E02", "S1E2" or "Season 1" after the show title
+_SERIES_MARKER = re.compile(
+    r'(?:^|\.)(?:S(\d{1,2})(?:\.?E(\d{1,3}))?|Season\.?(\d{1,2}))(?=[.\-_\[]|$)',
+    flags=re.IGNORECASE,
+)
+_TRAILING_YEAR = re.compile(r'^(.*?)[.(\[]*([12]\d{3})[)\]]*$')
+
+
+def series_info(name: str) -> dict | None:
+    """Parse a TV release name into title, optional year, season and episode.
+
+    Returns None when the name has no season marker. ``episode`` is None for
+    season packs such as ``Show.S02.1080p`` or ``Show Season 2``.
+    """
+    if not name:
+        return None
+    text = re.sub(r'\s+', '.', str(name).strip())
+    marker = _SERIES_MARKER.search(text)
+    if not marker or marker.start() == 0:
+        return None
+    title = text[:marker.start()].strip('.-_ ')
+    year = None
+    if match := _TRAILING_YEAR.match(title):
+        if match.group(1).strip('.-_ ('):
+            title, year = match.group(1), match.group(2)
+    title = title.replace('.', ' ').replace('_', ' ').strip(' -([')
+    if not title:
+        return None
+    season = marker.group(1) or marker.group(3)
+    episode = marker.group(2)
+    return {
+        'title': title,
+        'year': year,
+        'season': int(season),
+        'episode': int(episode) if episode else None,
+    }
+
+
+def series_title(name: str):
+    """Extract the show title from a TV release name."""
+    return (series_info(name) or {}).get('title')
+
+
+def series_year(name: str):
+    """Extract the optional show year from a TV release name."""
+    return (series_info(name) or {}).get('year')
+
+
+def series_season(name: str):
+    """Extract the season number from a TV release name."""
+    return (series_info(name) or {}).get('season')
+
+
+def series_episode(name: str):
+    """Extract the episode number from a TV release name, None for season packs."""
+    return (series_info(name) or {}).get('episode')
+
+
+def release_parsers(kind: str, source: str) -> tuple[dict, dict]:
+    """Return the mappings and transforms that parse a release name field.
+
+    ``source`` is the name of the raw field holding the release name.
+    """
+    if kind == 'tv':
+        mappings = {
+            'title': [source], 'year': [source], 'season': [source], 'episode': [source],
+        }
+        transforms = {
+            'title': series_title, 'year': series_year,
+            'season': series_season, 'episode': series_episode,
+        }
+        return mappings, transforms
+    return {'title': [source], 'year': [source]}, {'title': media_title, 'year': media_year}
+
+
 def media_resolution(title: str):
     """Extract media resolution from a given string."""
     ret = 'N/A'

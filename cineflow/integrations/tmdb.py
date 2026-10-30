@@ -4,6 +4,9 @@ from typing import List, Any
 from cineflow.core.logger import log
 from cineflow.utils.misc import fix_imdbid
 from cineflow.core.bases.module import ConsumerBase
+from cineflow.core.schema import (
+    ModuleDefinition, Field, KIND, LIMIT, QUICK_MATCH, consumer_actions,
+)
 
 
 class Tmdb(ConsumerBase):
@@ -21,6 +24,18 @@ class Tmdb(ConsumerBase):
 
     # IMDb IDs of TMDb items never change, so their lookups can be kept for long.
     IMDB_CACHE_TIME = 30 * 86400
+    CHECK_ENDPOINT = '/configuration'
+    DEFINITION = ModuleDefinition(
+        id='tmdb', label='TMDb', category='discovery', connection_test=True,
+        description="The Movie Database: trending titles and metadata lookups.",
+        fields=(
+            Field('token', 'secret', 'API key', "TMDb API key (v3).", required=True),
+            Field('language', 'string', 'Language', "Metadata language, e.g. en-US or hu-HU.",
+                  default='en-US', step=True),
+            KIND, LIMIT, QUICK_MATCH,
+        ),
+        actions=consumer_actions('TMDb'),
+    )
 
     def __init__(self, config: dict = None) -> None:
         """Initialize the TMDB consumer."""

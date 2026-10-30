@@ -72,8 +72,13 @@ class DirectoryHandler:
 
     def publish(
         self, item: str, media: dict, image: ImageHandler = None, resolution: str = None,
+        kind: str = 'movie',
     ) -> bool:
-        """Publish a complete library item without exposing a partial export."""
+        """Publish a complete library item without exposing a partial export.
+
+        A ``tv`` item gets a ``Season NN`` folder with one placeholder episode,
+        so media servers recognize it as a series.
+        """
         item_path = self._item_path(item)
         with self._lock:
             stage_path = self._path / f"{self.STAGE_PREFIX}{uuid4().hex}"
@@ -85,6 +90,7 @@ class DirectoryHandler:
                     image=image,
                     resolution=resolution,
                     media=media,
+                    kind=kind,
                 )
             except (OSError, ValueError) as e:
                 self._remove_tree(stage_path)
@@ -152,9 +158,15 @@ class DirectoryHandler:
 
     def _write_item(
         self, item_path: Path, item_name: str, image: ImageHandler, resolution: str, media: dict,
+        kind: str = 'movie',
     ) -> None:
         """Create all item files in a staging directory."""
-        file = re.split(r'[\(\[]', item_name, maxsplit=1)[0].strip() + '.mkv'
+        file = re.split(r'[\(\[]', item_name, maxsplit=1)[0].strip()
+        if kind == 'tv':
+            season = self._season_number(media.get('season'))
+            (item_path / f"Season {season:02d}").mkdir()
+            file = f"Season {season:02d}/{file} S{season:02d}E01"
+        file += '.mkv'
         media_dir = self._media_directory()
         if media_dir and self._copy_sample(
             file_path=item_path / file, media_dir=media_dir, resolution=resolution,
@@ -173,6 +185,14 @@ class DirectoryHandler:
             self._sync_file(item_path / image.filename)
             log(f"Image for item '{item_name}' saved successfully.")
         self._write_json(path=item_path / 'data.json', data=media)
+
+    @staticmethod
+    def _season_number(value) -> int:
+        """Return a valid season number for the placeholder episode."""
+        try:
+            return min(max(int(value), 0), 99)
+        except (TypeError, ValueError):
+            return 1
 
     def _replace_item(self, item_path: Path, stage_path: Path) -> bool:
         """Swap an existing item with a staged replacement and recover on restart."""

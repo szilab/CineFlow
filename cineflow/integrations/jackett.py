@@ -3,10 +3,13 @@
 from typing import List, Any
 from cineflow.core.logger import log
 from cineflow.utils.misc import (
-    sort_data, fix_imdbid, sanitize_name, media_title, media_year, media_resolution,
-    search_preference_score,
+    sort_data, fix_imdbid, sanitize_name, media_resolution, search_preference_score,
+    release_parsers,
 )
 from cineflow.core.bases.module import ConsumerBase
+from cineflow.core.schema import (
+    ModuleDefinition, Field, KIND, LIMIT, QUICK_MATCH, SEARCH_PREFERENCE, consumer_actions,
+)
 
 
 class Jackett(ConsumerBase):
@@ -17,19 +20,46 @@ class Jackett(ConsumerBase):
         - url: Jackett base URL (e.g., http://localhost:9117/api/v2.0/indexers/all/results)
         - token: Jackett API key (required)
         - limit: Number of torrent results to return (default: 10)
+        - kind: 'movie' (default) or 'tv'
+        - season_pack_only: for 'tv', skip single-episode releases (default: true)
 
     Functions:
         - get: Collet most recent torrents
         - search: Search torrents for a given title.
     """
 
+    CHECK_ENDPOINT = '/api/v2.0/indexers/all/results/torznab/api'
+    CHECK_PARAMS = {'t': 'caps'}
+    DEFINITION = ModuleDefinition(
+        id='jackett', label='Jackett', category='indexer', connection_test=True,
+        description="Torrent indexer proxy: recent releases and release search.",
+        fields=(
+            Field('url', 'url', 'URL', "Jackett base URL, e.g. http://jackett:9117.", required=True),
+            Field('token', 'secret', 'API key', "Jackett API key.", required=True),
+            KIND, LIMIT, QUICK_MATCH, SEARCH_PREFERENCE,
+            Field('include', 'string', 'Required words', "Words added to every search.", step=True),
+            Field('size_limit_gb', 'number', 'Size limit (GB)',
+                  "Skip larger releases; 0 means no limit.", minimum=0, step=True),
+            Field('season_pack_only', 'boolean', 'Season packs only',
+                  "For TV, skip single-episode releases.", default=True, step=True),
+        ),
+        actions=consumer_actions('Jackett', query=(
+            Field('include', 'string', 'Include words', "All words must be in the release name."),
+            Field('exclude', 'string', 'Exclude words', "Release names with these words are dropped."),
+            Field('seeders', 'integer', 'Minimum seeders', minimum=0),
+            Field('resolution', 'select', 'Resolution',
+                  options=('360p', '480p', '720p', '1080p', '1440p', '2160p', '4320p')),
+            Field('size', 'number', 'Maximum size (GB)', minimum=0),
+        )),
+    )
+
     def __init__(self, config: dict = None) -> None:
         super().__init__(config=config, required=['url', 'token'])
         self.cache_time = 3600
         self._category = '2000' if self._kind == "movie" else '5000'
+        release_mappings, release_transforms = release_parsers(kind=self._kind, source='Title')
         self._data_mappings = {
-            'title': ['Title'],
-            'year': ['Title'],
+            **release_mappings,
             'link': ['Link', 'MagnetUri'],
             'size': ['Size'],
             'torrent': ['Title'],
@@ -38,8 +68,7 @@ class Jackett(ConsumerBase):
             'imdbid': ['Imdb'],
         }
         self._data_transforms = {
-            'title': media_title,
-            'year': media_year,
+            **release_transforms,
             'resolution': media_resolution,
             'imdbid': fix_imdbid,
             'size': lambda x: int(x) / (1024 * 1024 * 1024),
@@ -62,7 +91,7 @@ class Jackett(ConsumerBase):
 
     def search(self, media: dict) -> dict:
         """Search torrents for the given title."""
-        if not media.get('title') or not media.get('year'):
+        if not media.get('title') or (self._kind != 'tv' and not media.get('year')):
             log(f"Item missing required fields: {media}", level='DEBUG')
             return None
         if match := self._match_result(media=media):
@@ -83,6 +112,10 @@ class Jackett(ConsumerBase):
         title = sanitize_name(name=media.get(titlekey))
         if not title or len(title) < 2:
             return []
+        if self._kind == 'tv':
+            # series release names rarely carry the show year
+            results = self._get_results(keywords=title)
+            return None if results is None else self._apply_size_limit(results)
         results = self._get_results(keywords=f"{title} {media.get('year')}")
         if results is None:
             return None
@@ -135,6 +168,8 @@ class Jackett(ConsumerBase):
         for item in sorted_items:
             if media := self.map(item=item):
                 results.append(media)
+        if self._kind == 'tv' and self.cfg('season_pack_only', default=True):
+            results = [item for item in results if item.get('episode') is None]
         return results
 
     def _parse_query(self, q: Any) -> tuple[str, int, str, Any, int]:
@@ -196,6 +231,8 @@ class Jackett(ConsumerBase):
         seen_titles = set()
         for item in results:
             title_year = f"{item.get('title')} ({item.get('year')})"
+            if self._kind == 'tv':
+                title_year += f" S{item.get('season')}E{item.get('episode')}"
             if title_year not in seen_titles:
                 filtered.append(item)
                 seen_titles.add(title_year)

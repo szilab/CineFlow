@@ -3,6 +3,9 @@
 from typing import List, Any
 from cineflow.core.logger import log
 from cineflow.core.bases.module import MediaServerBase
+from cineflow.core.schema import (
+    ModuleDefinition, Field, KIND, LIMIT, QUICK_MATCH, MEDIA_SERVER_QUERY, consumer_actions,
+)
 from cineflow.utils.misc import fix_imdbid
 
 
@@ -14,6 +17,7 @@ class Jellyfin(MediaServerBase):
         - url: Jellyfin base URL (e.g., http://localhost:8096)
         - token: Jellyfin API key (required)
         - limit: Number of results to return (default: 20)
+        - kind: 'movie' (default) or 'tv' to query series
 
     Functions:
         - search: Search media for a given title.
@@ -21,6 +25,25 @@ class Jellyfin(MediaServerBase):
 
     ID_KEY = 'jellyfinid'
     LIBRARY_KEY = 'ParentId'
+    ITEM_TYPES = {'movie': 'Movie', 'tv': 'Series'}
+    CHECK_ENDPOINT = '/System/Info'
+    DEFINITION = ModuleDefinition(
+        id='jellyfin', label='Jellyfin', category='media server', connection_test=True,
+        description="Jellyfin media server: libraries, favorites and played state.",
+        fields=(
+            Field('url', 'url', 'URL', "Jellyfin base URL, e.g. http://jellyfin:8096.", required=True),
+            Field('token', 'secret', 'API key', "Jellyfin API key.", required=True),
+            KIND, LIMIT, QUICK_MATCH,
+            Field('ignore.users', 'list', 'Ignored users', "User names left out of queries."),
+        ),
+        actions=consumer_actions('Jellyfin', query=(
+            *MEDIA_SERVER_QUERY,
+            Field('isFavorite', 'boolean', 'Favorites only'),
+            Field('isPlayed', 'boolean', 'Played'),
+            Field('allUsers', 'boolean', 'All users', "Query every user."),
+            Field('userName', 'string', 'User', "Query one user."),
+        )),
+    )
 
     def __init__(self, config: dict = None) -> None:
         super().__init__(config=config, required=['url', 'token'])
@@ -94,7 +117,7 @@ class Jellyfin(MediaServerBase):
                 **(query if isinstance(query, dict) else {}),
             }
             if self._kind:
-                params["includeItemTypes"] = self._kind
+                params["includeItemTypes"] = self.ITEM_TYPES[self._kind]
             params = {k: v for k, v in params.items() if v is not None and v != ""}
             response = self._handler.get(
                 endpoint=f"/Users/{u}/Items" if u else "/Items",

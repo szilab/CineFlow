@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CineFlow</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233a59d1'/%3E%3Cpath d='M11 9l13 7-13 7z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo" aria-hidden="true"></span>CineFlow</div>
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab" data-view="flows" role="tab">Flows</button>
+      <button type="button" class="tab" data-view="modules" role="tab">Modules</button>
+      <button type="button" class="tab" data-view="settings" role="tab">Settings</button>
+    </nav>
+    <div class="runtime" id="runtime-status"></div>
+  </header>
+  <main id="app" class="app"></main>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <dialog id="dialog" class="dialog"></dialog>
+  <script src="static/app.js"></script>
+</body>
+</html>

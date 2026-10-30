@@ -3,6 +3,8 @@ import os
 import re
 import sys
 import threading
+from collections import deque
+from contextlib import contextmanager
 from datetime import datetime
 from enum import Enum
 
@@ -17,6 +19,30 @@ def redact_secrets(message: str) -> str:
     """Mask credential values in URLs and dictionary representations."""
     message = _SECRET_QUERY.sub(r"\1***", message)
     return _SECRET_MAPPING.sub(r"\1***", message)
+
+
+_context = threading.local()
+# recent messages for the GUI, newest last
+_recent = deque(maxlen=int(os.environ.get('LOG_HISTORY', '2000')))
+_recent_lock = threading.Lock()
+
+
+@contextmanager
+def log_context(flow: str):
+    """Attribute the messages logged by this thread to a flow."""
+    previous = getattr(_context, 'flow', None)
+    _context.flow = flow
+    try:
+        yield
+    finally:
+        _context.flow = previous
+
+
+def recent_logs(flow: str | None = None, limit: int = 200) -> list[dict]:
+    """Return recent log records, optionally only those of one flow."""
+    with _recent_lock:
+        records = [record for record in _recent if flow is None or record['flow'] == flow]
+    return records[-limit:]
 
 
 def log(message, level: str = 'DEBUG'):
@@ -69,6 +95,13 @@ class Logger():
         if not self._should_log(level):
             return
         message = redact_secrets(str(message))
+        with _recent_lock:
+            _recent.append({
+                'time': datetime.now().isoformat(timespec='seconds'),
+                'level': level,
+                'flow': getattr(_context, 'flow', None),
+                'message': message,
+            })
         with self._lock:
             thread = threading.current_thread().name
             thread = thread.replace('MainThread', 'main')

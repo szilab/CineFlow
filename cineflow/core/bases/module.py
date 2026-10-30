@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from abc import ABC, abstractmethod
 from cineflow.core.logger import log
 from cineflow.core.config import Config, cfg
-from cineflow.utils.misc import sanitize_name
+from cineflow.utils.misc import MEDIA_KINDS, sanitize_name
 from cineflow.utils.request import RequestHandler
 from cineflow.utils.directory import CleanupScheduler, DirectoryHandler
 
@@ -24,6 +24,8 @@ def _merge_config(base: dict, override: dict) -> dict:
 class ModuleBase():
     """Consumer base class"""
 
+    _kind = 'movie'
+
     def __init__(self, config: dict = None, required: list = None) -> None:
         """Initialize the module."""
         self.name = self.__class__.__name__.lower()
@@ -39,6 +41,8 @@ class ModuleBase():
             if self.cfg(key):
                 continue
             raise ValueError(f"Missing required module config '{self.name}.{key}'")
+        self._kind = 'movie'
+        self.kind = self.cfg('kind', default='movie')
 
     def cfg(self, key: str, default=None) -> dict:
         """Return the module configuration."""
@@ -47,12 +51,13 @@ class ModuleBase():
     def map(self, item: dict) -> dict:
         """Interpret the received item as the data structure.
 
-        Only title and year are mandatory. Optional properties without a value
-        are left out, so a later flow step (for example ``enrich``) can fill them.
+        Only title and year are mandatory; series release names often carry no
+        year, so for ``kind: tv`` only the title is. Optional properties without
+        a value are left out, so a later flow step (for example ``enrich``) can
+        fill them.
         """
         data = self._map_props(item=item)
-        # all items must have a title and year
-        if not data.get('title') or not data.get('year'):
+        if not data.get('title') or (self._kind != 'tv' and not data.get('year')):
             log(f"Item missing required fields: {item}")
             return {}
         if not self._empty_property_allowed:
@@ -78,6 +83,17 @@ class ModuleBase():
             if prop in self._data_transforms and data.get(prop):
                 data[prop] = self._data_transforms[prop](data[prop])
         return data
+
+    @property
+    def kind(self) -> str:
+        """Media kind handled by the module: 'movie' or 'tv'."""
+        return self._kind
+
+    @kind.setter
+    def kind(self, value: str) -> None:
+        if value not in MEDIA_KINDS:
+            raise ValueError("Kind must be either 'movie' or 'tv'.")
+        self._kind = value
 
     @property
     def mappings(self) -> Dict:
@@ -107,6 +123,10 @@ class ModuleBase():
 class ConsumerBase(ModuleBase, ABC):
     """Consumer module base class."""
 
+    # cheap authenticated request used by the connection test
+    CHECK_ENDPOINT = ''
+    CHECK_PARAMS: dict = {}
+
     def __init__(self, url: str = None, config: dict = None, required: list = None) -> None:
         """Initialize the consumer module."""
         super().__init__(config=config, required=required)
@@ -114,7 +134,6 @@ class ConsumerBase(ModuleBase, ABC):
         if not self._url:
             raise ValueError(f"Missing required module config '{self.name}.url'")
         self._handler = RequestHandler(url=self._url)
-        self._kind = 'movie'
         self._limit = self.cfg('limit', 100)
         self._force_upd_fields = []
 
@@ -125,6 +144,26 @@ class ConsumerBase(ModuleBase, ABC):
     @abstractmethod
     def search(self, media: dict) -> dict:
         """Search media for the given title and year."""
+
+    def check_connection(self) -> dict:
+        """Test the service connection and credentials without using the cache."""
+        if not self.CHECK_ENDPOINT:
+            return {'ok': False, 'message': 'Connection test is not supported.'}
+        response = self._handler.get(
+            endpoint=self.CHECK_ENDPOINT, params=dict(self.CHECK_PARAMS), cache_time=0,
+        )
+        return self._check_result(status=response.status)
+
+    @staticmethod
+    def _check_result(status: int) -> dict:
+        """Describe a connection test HTTP status."""
+        if 200 <= status < 300:
+            return {'ok': True, 'message': f'Connected (HTTP {status}).'}
+        if status == 0:
+            return {'ok': False, 'message': 'Service is unreachable.'}
+        if status in (401, 403):
+            return {'ok': False, 'message': f'Authentication failed (HTTP {status}).'}
+        return {'ok': False, 'message': f'Unexpected response (HTTP {status}).'}
 
     def match(self, results: List[Dict], media: dict) -> dict:
         """Match item from the results"""
@@ -161,7 +200,9 @@ class ConsumerBase(ModuleBase, ABC):
         ia = sanitize_name(name=item.get('alttitle')).lower()
         iy = str(item.get('year'))
         my = str(media.get('year'))
-        if not quick_match:
+        # series releases often have no year; the title alone must match then
+        year_unknown = self._kind == 'tv' and not (item.get('year') and media.get('year'))
+        if not quick_match and not year_unknown:
             if iy != my:
                 return False
         if it == title:
@@ -240,16 +281,6 @@ class ConsumerBase(ModuleBase, ABC):
             if key not in original or key in self._force_upd_fields:
                 original[key] = value
         return original
-
-    @property
-    def kind(self) -> str:
-        return self._kind
-
-    @kind.setter
-    def kind(self, value: str) -> None:
-        if value not in ['movie', 'tv']:
-            raise ValueError("Kind must be either 'movie' or 'tv'.")
-        self._kind = value
 
     @property
     def cache_time(self) -> int:

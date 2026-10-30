@@ -8,13 +8,16 @@ CineFlow is an open-source, configuration-driven media automation system for dis
 
 CineFlow is inspired by media request and automation tools such as Overseerr/Jellyseerr/Seerr, but it intentionally follows a different model: **the workflow engine and replaceable integration modules are the product core**. Jellyfin, Plex, TMDb, Jackett, Transmission, and future integrations such as Radarr, Sonarr, Trakt, or Simkl can participate as optional workflow steps rather than forming a mandatory stack.
 
-The current runtime is headless and YAML-driven. A first-party GUI is planned to make global/module configuration and workflow creation significantly easier while preserving YAML as the portable source-of-truth format.
+The runtime is headless and YAML-driven. An optional built-in web GUI configures modules and builds flows visually while keeping YAML as the source-of-truth format (see **[docs/GUI.md](docs/GUI.md)**).
 
 ---
 
 ## Features
 
 ### Core Capabilities
+- Movies and TV series (`kind: tv`)
+- Optional web GUI: module manager, card-based drag-and-drop flow editor, validation, manual runs
+- `cineflow validate` preflight check of configuration and flows
 - Automated media discovery via TMDb
 - Torrent search integration through Jackett
 - Media server synchronization with Jellyfin and Plex
@@ -31,6 +34,7 @@ The current runtime is headless and YAML-driven. A first-party GUI is planned to
 - **Jellyfin** – media server and user/library state
 - **Plex** – media server and library state
 - **Transmission** – download client
+- **qBittorrent** – download client
 
 ### Planned Optional Integrations
 - **Radarr** – movie acquisition/management workflow module
