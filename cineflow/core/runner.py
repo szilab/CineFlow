@@ -14,6 +14,7 @@ from cineflow.core.config import cfg
 from cineflow.core.bases.module import ModuleBase, _merge_config
 from cineflow.core.bases.worker import WorkerBase
 from cineflow.core.logger import log, log_context
+from cineflow.core.schema import DEFAULT_MEDIA_KIND, FLOW_SETTINGS, flow_media_kind, validate_value
 from cineflow.utils.misc import load_module
 from cineflow.runtime import config_directory
 
@@ -25,13 +26,9 @@ class FlowManager(WorkerBase):
         """Initialize the task runner."""
         super().__init__()
         try:
-            self._delay = int(os.environ.get("FM_REFRESH_SEQ", os.environ.get("FM_RERESH_SEQ", 60)))
+            self._delay = int(os.environ.get("FM_REFRESH_SEQ", 60))
         except ValueError:
-            log(
-                "Invalid refresh sequence value in "
-                "'FM_REFRESH_SEQ' or legacy 'FM_RERESH_SEQ', using default 60 minutes.",
-                level="WARNING"
-            )
+            log("Invalid 'FM_REFRESH_SEQ' value, using default 60 minutes.", level="WARNING")
             self._delay = 60
         self._dir = str(config_directory())
         self._flows = {}
@@ -199,8 +196,13 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         self.steps = []
         self.priority = 99
         self.delay = 60
+        self.kind = DEFAULT_MEDIA_KIND
         self.enabled = True
         self._enabled_valid = True
+        self._kind_valid = True
+        # flow settings handed to the modules that use them (see FLOW_SETTINGS)
+        self.settings = {}
+        self._settings_valid = True
         self._mod_cache = {}
         self._outputs = {}
         self._run_lock = threading.Lock()
@@ -309,6 +311,20 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         """Return whether the parsed flow is runnable."""
         return self._valid
 
+    def _module_settings(self, module_id: str) -> dict:
+        """Return the flow settings for one module; they always come from the flow."""
+        values = {}
+        for flow_key, setting in FLOW_SETTINGS.items():
+            if module_id not in setting.modules:
+                continue
+            if flow_key in self.settings:
+                values[setting.module_key] = copy.deepcopy(self.settings[flow_key])
+            elif setting.kind_default:
+                values[setting.module_key] = self.kind
+            else:
+                values[setting.module_key] = copy.deepcopy(setting.field.default)
+        return values
+
     def _load_module(self, step: dict) -> ModuleBase | None:
         """Load a module by its name."""
         name = step.get('module')
@@ -321,6 +337,9 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
                 return None
             # module defaults < instance settings < step settings
             config = _merge_config(instance.get('config') or {}, config)
+        # every module handles the media kind of the flow
+        config = _merge_config(config, {'kind': self.kind})
+        config = _merge_config(config, self._module_settings(name))
         # Use a hash of the config to reuse instances with identical settings
         cache_key = f"{name}_{instance_id}_{hash(str(config))}"
 
@@ -426,6 +445,13 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
             self.steps = data.get("steps", self.steps)
             self.delay = data.get("delay", self.delay)
             self.priority = data.get("priority", self.priority)
+            kind = flow_media_kind(data)
+            if kind is None:
+                self._kind_valid = False
+                log(f"Invalid media kind in '{self._filename}': expected movie or tv.", level="WARNING")
+            else:
+                self.kind = kind
+            self._apply_settings(data)
             enabled = data.get("enabled", True)
             if isinstance(enabled, bool):
                 self.enabled = enabled
@@ -437,9 +463,22 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
                     "expected a YAML boolean.", level="WARNING"
                 )
 
+    def _apply_settings(self, data: dict) -> None:
+        """Take the flow settings; an invalid value stops the flow (fail closed)."""
+        self.settings = {}
+        for flow_key, setting in FLOW_SETTINGS.items():
+            value = data.get(flow_key)
+            if value is None or value == '' or value == []:
+                continue
+            if issues := validate_value(setting.field, value, (flow_key,)):
+                self._settings_valid = False
+                log(f"Invalid '{flow_key}' in '{self._filename}': {issues[0].message}", level="WARNING")
+                continue
+            self.settings[flow_key] = value
+
     def _validate_flow(self) -> bool:
         self._parse_file()
-        if not self._enabled_valid:
+        if not self._enabled_valid or not self._kind_valid or not self._settings_valid:
             return False
         if not isinstance(self.steps, list) or not self.steps:
             log(f"Flow steps are missing or invalid in '{self._filename}'.", level="WARNING")

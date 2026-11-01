@@ -4,7 +4,7 @@ from typing import List
 from cineflow.core.logger import log
 from cineflow.core.bases.module import MediaServerBase
 from cineflow.core.schema import (
-    ModuleDefinition, Field, KIND, LIMIT, QUICK_MATCH, MEDIA_SERVER_QUERY, consumer_actions,
+    ModuleDefinition, Field, MEDIA_SERVER_QUERY, consumer_actions,
 )
 from cineflow.utils.misc import fix_imdbid
 
@@ -16,7 +16,6 @@ class Plex(MediaServerBase):
     Configuration:
         - url: Plex base URL (e.g., http://localhost:32400)
         - token: Plex authentication token (required)
-        - limit: Number of results to return (default: 100)
 
     Functions:
         - get: Collect media from Plex.
@@ -32,8 +31,8 @@ class Plex(MediaServerBase):
         fields=(
             Field('url', 'url', 'URL', "Plex base URL, e.g. http://plex:32400.", required=True),
             Field('token', 'secret', 'Token', "Plex authentication token.", required=True),
-            KIND, LIMIT, QUICK_MATCH,
-            Field('ignore.libraries', 'list', 'Ignored libraries', "Library names left out of queries."),
+            Field('ignore.libraries', 'list', 'Ignored libraries', "Library names left out of queries.",
+                  advanced=True),
         ),
         actions=consumer_actions('Plex', query=(
             *MEDIA_SERVER_QUERY,

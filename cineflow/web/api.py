@@ -18,7 +18,8 @@ import yaml
 from cineflow.core import catalog, preview, store, validation
 from cineflow.core.config import Config
 from cineflow.core.logger import log, recent_logs
-from cineflow.core.schema import has_errors
+from cineflow.core.schema import FLOW_SETTINGS, has_errors
+from cineflow.runtime import export_directory
 
 INSTANCE_ID = validation.INSTANCE_ID
 
@@ -223,8 +224,16 @@ class Api:
         return {'status': 'ok', 'version': __version__, 'runtime': self._manager is not None}
 
     def catalog(self, body=None) -> dict:  # pylint: disable=unused-argument
-        """Return every module definition."""
-        return {'modules': [item.to_dict() for item in catalog.definitions().values()]}
+        """Return every module definition, the flow settings and the library export root."""
+        return {
+            'modules': [item.to_dict() for item in catalog.definitions().values()],
+            'flow_settings': [
+                {'key': key, 'field': setting.field.to_dict(), 'module_key': setting.module_key,
+                 'modules': list(setting.modules), 'kind_default': setting.kind_default}
+                for key, setting in FLOW_SETTINGS.items()
+            ],
+            'export_directory': str(export_directory()),
+        }
 
     def list_instances(self, body=None) -> dict:  # pylint: disable=unused-argument
         """Return the module defaults and named instances with their status."""

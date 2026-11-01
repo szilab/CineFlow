@@ -79,7 +79,7 @@ def test_successful_search_still_returns_matching_torrent() -> None:
             "Imdb": "tt2543164",
         }],
     }
-    consumer, _ = jackett_with_handler(payload, quick_match=True)
+    consumer, _ = jackett_with_handler(payload)
 
     match = consumer.search({"title": "Arrival", "year": "2016"})
 

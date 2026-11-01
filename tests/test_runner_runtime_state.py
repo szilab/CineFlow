@@ -63,7 +63,7 @@ def test_step_instance_settings_are_merged_under_step_settings(make_flow, isolat
     flow = make_flow([{'name': 's', 'module': 'fake', 'instance': 'home', 'action': 'get', 'config': {'limit': 9}}])
 
     assert flow.execute() == 'success'
-    assert Recorder.configs == [{'url': 'u', 'limit': 9}]
+    assert Recorder.configs == [{'url': 'u', 'limit': 9, 'kind': 'movie'}]
 
 
 @pytest.mark.parametrize('instance', ['missing', 'other'])

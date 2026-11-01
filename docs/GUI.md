@@ -191,43 +191,71 @@ renamed.
 
 ## Using the GUI
 
-**Modules** lists every module with its default and named instances. Selecting
-one opens a generated form. *Validate* checks the unsaved values, *Test
-connection* performs one cheap authenticated request (TMDb, Jackett,
-Jellyfin, Plex, Transmission, qBittorrent) with the unsaved values, *Save*
-writes `config.yaml`. Saving settings rebuilds the module objects of every
+**Modules** lists every module with its connection (and any named instances
+from `config.yaml`; named instances are not created in the GUI). Selecting
+one opens a generated form. *Test* checks the unsaved values and, when
+they are valid, performs one cheap authenticated request (TMDb, Jackett,
+Jellyfin, Plex, Transmission, qBittorrent) with them; *Save* writes
+`config.yaml`. Saving settings rebuilds the module objects of every
 flow, so the change applies from the next step without a restart.
+Text fields and switches sit side by side in two equal columns; word lists
+(e.g. *Search preference*) take a full row at the end of their section.
 
-**Flows** shows the flows with their schedule, validation and last result.
-The editor is a vertical pipeline of action cards:
+Word lists (here and on steps) are edited as labels: type a word and press
+Enter or the arrow inside the field to add it; drag labels to change their
+order (or focus one and use Alt+arrow keys), and remove one with its ×
+(or Delete). Lists of mappings, such as the library poster rules, stay a
+JSON text box.
 
-- drag an action from the *Actions* list on the left and drop it anywhere in
-  the pipeline, or click it to append it; the *+* between two cards and
-  *+ Add action* open the searchable action catalog;
-- drag a card (or focus it and press Alt+↑/↓) to reorder, *⧉* duplicates
-  it, *✕* or the Delete key removes it;
-- a card whose module has no complete settings shows *set up*, which opens
-  the module settings in a dialog; the step panel has the same *Configure*
-  button and can create a new connection on the spot;
-- click a card to edit its name, action, module instance, input source
-  (previous step, a named earlier step, or several merged steps), query,
-  arguments and step settings;
-- cards and fields show errors and warnings from the backend validator while
-  you type;
-- *Test run* (or *▶* on a card for "up to this step") runs the flow with
-  real data but **without side effects** — see below;
-- *Save* writes the YAML file and reloads the flow at once;
-- *Run now* starts one run in the background; the side panel shows the last
-  result, the failing step and the recent log messages of the flow;
-- *Export YAML* downloads the file without secrets, *Import* creates a flow
-  from YAML.
+**Flows** has a second menu row with one entry per flow (long names are
+shortened; a dot shows enabled, disabled, invalid or running) and a *+* at
+the end. *+* opens a small dialog that creates a disabled flow without steps
+from a name, description, media kind and schedule, or imports one from YAML.
+
+The flow page shows the flow name as its title with the description below;
+both are edited in place. Next to them are the flow media kind (*Movies* or
+*TV series*, passed to every step; it is not a module setting) and the
+*Save*, *Test run*, *Run now*, *Export YAML* and *Delete* buttons. Below:
+
+- left, the *Schedule* card (enabled switch, interval, priority), the
+  *Library & releases* card when a Library or Jackett step needs it (the
+  library folder inside the export directory, default the media kind, and
+  the release preference as word labels), and the *Actions* card: click a module name to open its actions (one module is
+  open at a time), then drag an action anywhere into the pipeline or click
+  it to append it; the *+* between two cards and *+ Add action* open the
+  searchable action catalog;
+- middle, the steps as a vertical pipeline of cards: drag a card (or focus it
+  and press Alt+↑/↓) to reorder, *⧉* duplicates it, *✕* or the Delete key
+  removes it, *▶* test runs up to it; a card whose module has no complete
+  settings shows *set up*, which opens the module settings in a dialog;
+- right, the settings of the selected step (click the card again to close
+  them): name, action, input source (previous step, a named earlier step, or
+  several merged steps), query, arguments and the action's own settings.
+  Yes/no values are switches. Options a regular user rarely needs (marked
+  `advanced` in the module definition, e.g. item limits, search
+  term, inverse queries, extra JSON parameters) are in a collapsed *More
+  options* section, which opens by itself when one of them is in use; the
+  Modules page groups such settings the same way. The module is shown at the top right, green
+  when it is ready and red when it still needs settings; click it to open the
+  module settings. Connections and the other module settings (limits,
+  download folders, …) belong to the module. A step keeps showing a module
+  setting only when its YAML already overrides it, or when a required
+  step-level value is missing, with *Use module value* to drop the override.
+
+Cards and fields show errors and warnings from the backend validator while
+you type. *Test run* runs the flow with real data but **without side
+effects** — see below. *Save* writes the YAML file and reloads the flow at
+once; *Run now* starts one run in the background.
 
 A flow with validation errors can only be saved disabled, as a draft. If the
 file changed on disk after it was opened, saving is refused until it is
 reloaded, so concurrent hand edits are never overwritten silently.
 
-**Modules** also has *Test all connections* and a quick *⚡* test next to
-every complete connection.
+The **Modules** page lists the modules that have settings (Tools has none, so
+it is not shown). Every card shows the state of its module in the top
+right corner (*ready*, *incomplete*, *invalid* or *unreachable*); clicking the
+card opens its settings on the right. While the page is open it re-checks the
+module states and tests every complete connection once a minute.
 
 ### Test runs
 
@@ -241,8 +269,9 @@ result, item count and duration, a table of the first 25 items (credentials in
 values are masked) and the log messages of the test. A test is stopped after
 three minutes; at most two run at the same time.
 
-**Settings** edits the execution mode, runs a validation of everything and
-exports `config.yaml` without secrets.
+The execution mode is set with `execution` in `config.yaml`. A validation
+report of everything and a `config.yaml` export without secrets are still
+available through the API (`GET validate`, `GET config/export`).
 
 ## Validation
 
@@ -276,15 +305,10 @@ Every GUI write first copies the previous file to `CFG_DIRECTORY/.backups`
 atomically. Deleting a flow also leaves a backup. Writing `config.yaml` from
 the GUI drops YAML comments in it; the backup keeps the original.
 
-## Migration
-
-No migration is needed. Existing `config.yaml` and flow files are used as
-they are, and the GUI opens them directly. Recommended steps:
+## Getting started
 
 1. Run `cineflow validate` and fix the reported errors.
 2. Start CineFlow with `CINEFLOW_WEB_PORT` and check the module statuses.
-3. Optionally move credentials of a second server into a named instance and
-   select it in the steps that use it.
 
 Flows that use an input shape the form cannot represent are still editable as
 JSON in the step panel.

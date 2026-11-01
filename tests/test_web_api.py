@@ -106,6 +106,20 @@ def test_catalog_lists_all_modules(api: Api) -> None:
     assert {item['id'] for item in modules} >= {'tmdb', 'jackett', 'library', 'tools'}
 
 
+def test_catalog_describes_flow_settings_and_export_root(
+    api: Api, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv('EXPORT_DIRECTORY', str(tmp_path))
+    payload = ok(api.handle('GET', '/api/catalog'))
+    settings = {item['key']: item for item in payload['flow_settings']}
+
+    assert payload['export_directory'] == str(tmp_path.resolve())
+    assert settings['library_directory']['modules'] == ['library']
+    assert settings['library_directory']['kind_default'] is True
+    assert settings['search_preference']['modules'] == ['jackett', 'library']
+    assert settings['search_preference']['field']['type'] == 'list'
+
+
 # ---------------------------------------------------------------- instances
 
 def test_instances_mask_secrets_and_report_status(api: Api) -> None:

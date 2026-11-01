@@ -8,7 +8,7 @@ from cineflow.utils.misc import (
 )
 from cineflow.core.bases.module import ConsumerBase
 from cineflow.core.schema import (
-    ModuleDefinition, Field, KIND, LIMIT, QUICK_MATCH, SEARCH_PREFERENCE, consumer_actions,
+    ModuleDefinition, Field, LIMIT, consumer_actions,
 )
 
 
@@ -19,8 +19,9 @@ class Jackett(ConsumerBase):
     Configuration:
         - url: Jackett base URL (e.g., http://localhost:9117/api/v2.0/indexers/all/results)
         - token: Jackett API key (required)
-        - limit: Number of torrent results to return (default: 10)
-        - kind: 'movie' (default) or 'tv'
+        - limit: safety cap of collected torrent results (default: 200)
+        - kind: 'movie' (default) or 'tv', given by the flow
+        - search_preference: release name preferences, given by the flow
         - season_pack_only: for 'tv', skip single-episode releases (default: true)
 
     Functions:
@@ -36,8 +37,9 @@ class Jackett(ConsumerBase):
         fields=(
             Field('url', 'url', 'URL', "Jackett base URL, e.g. http://jackett:9117.", required=True),
             Field('token', 'secret', 'API key', "Jackett API key.", required=True),
-            KIND, LIMIT, QUICK_MATCH, SEARCH_PREFERENCE,
-            Field('include', 'string', 'Required words', "Words added to every search.", step=True),
+            LIMIT,
+            Field('include', 'string', 'Required words', "Words added to every search.", step=True,
+                  advanced=True),
             Field('size_limit_gb', 'number', 'Size limit (GB)',
                   "Skip larger releases; 0 means no limit.", minimum=0, step=True),
             Field('season_pack_only', 'boolean', 'Season packs only',

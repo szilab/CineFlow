@@ -36,7 +36,7 @@ class Database(WorkerBase, metaclass=SingletonMeta):
         self.start()
 
     def create_tables(self) -> None:
-        """Create the request cache schema and add the expiry column to older files."""
+        """Create the request cache schema."""
         with self._lock:
             try:
                 if self._cursor is None or self._conn is None:
@@ -45,11 +45,6 @@ class Database(WorkerBase, metaclass=SingletonMeta):
                     "CREATE TABLE IF NOT EXISTS request (hash TEXT NOT NULL PRIMARY KEY, "
                     "data BLOB NOT NULL, added REAL NOT NULL, expire REAL);"
                 )
-                self._cursor.execute("PRAGMA table_info(request);")
-                if "expire" not in [row[1] for row in self._cursor.fetchall()]:
-                    self._cursor.execute("ALTER TABLE request ADD COLUMN expire REAL;")
-                # older versions kept an unused media cache table
-                self._cursor.execute("DROP TABLE IF EXISTS media;")
                 self._conn.commit()
             except (AttributeError, sqlite3.Error) as error:
                 log(f"Error creating cache DB tables: {error}", level="WARNING")

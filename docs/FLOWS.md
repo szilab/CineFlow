@@ -73,6 +73,9 @@ steps:
 | `enabled` | boolean | whether the flow is runnable |
 | `delay` | integer | delay in minutes between executions |
 | `priority` | integer | execution ordering in sequential mode |
+| `kind` | `movie` or `tv` | media kind of the flow (default `movie`); the flow passes it to every module it calls |
+| `library_directory` | path | library folder inside `EXPORT_DIRECTORY` for the library steps (default: the media kind) |
+| `search_preference` | list | release name words in order of preference, used by Jackett and the library |
 | `steps` | list | ordered step definitions |
 
 ## 4. Steps
@@ -253,12 +256,11 @@ steps:
 name: series-favorites-download
 enabled: true
 delay: 30
+kind: tv
 steps:
   - name: Collect Jellyfin series favorites
     module: jellyfin
     action: get
-    config:
-      kind: tv
     input:
       query:
         isFavorite: true
@@ -268,14 +270,12 @@ steps:
     action: enrich
     input: previous
     config:
-      kind: tv
       must_match: true
   - name: Find season pack
     module: jackett
     action: enrich
     input: previous
     config:
-      kind: tv
       must_match: true
   - name: Download
     module: transmission
@@ -335,9 +335,9 @@ Flows with errors can only be saved disabled. See [GUI.md](GUI.md).
 
 ## 12. Workflow Runtime View
 
-The GUI shows, per flow: enabled state, running/idle, last start and end,
-last result, the failing step and error, the next due time in sequential
-mode, recent log messages of the flow, and a manual *Run now* trigger.
+The flow menu of the GUI marks each flow as enabled, disabled, invalid or
+running, and the flow page has a manual *Run now* trigger. Runtime details
+and log messages are in the CineFlow log.
 
 ## 13. Design Constraints
 

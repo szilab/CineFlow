@@ -101,3 +101,27 @@ def test_title_match_ignores_year_type_differences() -> None:
     consumer = FakeConsumer([{"title": "Arrival", "year": 2016}])
 
     assert consumer.common([{"title": "Arrival", "year": "2016"}]) == [{"title": "Arrival", "year": "2016"}]
+
+
+def test_limit_defaults_to_a_high_safety_cap() -> None:
+    assert FakeConsumer([]).limit == 200
+
+
+def test_single_result_with_another_year_does_not_match() -> None:
+    """A lone result with the same title but another year may be a remake.
+
+    The removed ``quick_match`` setting used to accept it; an old value is ignored.
+    """
+    consumer = FakeConsumer([])
+    consumer._cfg = {**consumer._cfg, "quick_match": True}
+    media = {"title": "Dune", "year": "2021"}
+
+    assert consumer.match([{"title": "Dune", "year": "1984"}], media) is None
+
+
+def test_ids_match_even_when_the_years_differ() -> None:
+    consumer = FakeConsumer([])
+    media = {"title": "Arrival", "year": "2016", "tmdbid": "329865"}
+    result = {"title": "Arrival", "year": "2017", "tmdbid": 329865}
+
+    assert consumer.match([result], media) == result

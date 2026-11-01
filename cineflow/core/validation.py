@@ -11,12 +11,12 @@ from typing import Any
 
 from cineflow.core import catalog
 from cineflow.core.schema import (
-    Issue, error, warning, has_errors, validate_fields, get_path,
+    FLOW_SETTINGS, MEDIA_KINDS, Issue, error, warning, has_errors, validate_fields, validate_value, get_path,
 )
 
 EXECUTION_MODES = ('parallel', 'sequential')
 CONFIG_ROOT_KEYS = ('execution', 'instances')
-FLOW_KEYS = ('name', 'description', 'version', 'enabled', 'delay', 'priority', 'steps')
+FLOW_KEYS = ('name', 'description', 'version', 'enabled', 'delay', 'priority', 'kind', *FLOW_SETTINGS, 'steps')
 STEP_KEYS = ('name', 'module', 'action', 'instance', 'input', 'config')
 INSTANCE_ID = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 
@@ -296,6 +296,11 @@ def validate_flow(flow: Any, config: dict | None = None) -> list[Issue]:  # noqa
         issues.append(error(('priority',), "Priority must be a whole number.", 'type'))
     if 'description' in flow and not isinstance(flow['description'], (str, type(None))):
         issues.append(error(('description',), "Expected text.", 'type'))
+    if flow.get('kind') is not None and flow.get('kind') not in MEDIA_KINDS:
+        issues.append(error(('kind',), "Expected one of: movie, tv.", 'choice'))
+    for flow_key, setting in FLOW_SETTINGS.items():
+        if flow.get(flow_key) not in (None, '', []):
+            issues.extend(validate_value(setting.field, flow[flow_key], (flow_key,)))
     steps = flow.get('steps')
     if not isinstance(steps, list) or not steps:
         return issues + [error(('steps',), "A flow needs at least one step.", 'required')]

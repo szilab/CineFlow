@@ -5,7 +5,7 @@ from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Dict, List
 from cineflow.core.bases.module import TorrentClientBase
 from cineflow.core.schema import (
-    ModuleDefinition, ActionDefinition, Field, KIND, INPUT_DATA, INPUT_QUERY, consumer_actions,
+    ModuleDefinition, ActionDefinition, Field, INPUT_DATA, INPUT_QUERY, consumer_actions,
 )
 from cineflow.core.logger import log
 from cineflow.utils.misc import release_parsers
@@ -35,9 +35,8 @@ class QBittorrent(TorrentClientBase):
             Field('password', 'secret', 'Password'),
             Field('directory', 'string', 'Download directory',
                   "Download directory on the client's machine.", step=True),
-            KIND,
-            Field('category', 'string', 'Category', step=True),
-            Field('tags', 'string', 'Tags', "Comma-separated tags.", step=True),
+            Field('category', 'string', 'Category', step=True, advanced=True),
+            Field('tags', 'string', 'Tags', "Comma-separated tags.", step=True, advanced=True),
         ),
         actions=(
             ActionDefinition('get', 'Get torrents', "List the torrents of the client.",

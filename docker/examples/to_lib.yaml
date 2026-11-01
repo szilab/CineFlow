@@ -1,6 +1,9 @@
 name: Import media to library
 delay: 60  # minutes
 priority: 1
+kind: movie
+# library items are created in EXPORT_DIRECTORY/movie unless 'library_directory' is set
+search_preference: ["HUN", "HDR", "1080p", "2160p"]
 steps:
 
   - name: Collect from Jackett

@@ -1,12 +1,7 @@
 #execution: sequential
-tmdb:
-  quick_match: true
 jackett:
   size_limit_gb: 26
-  search_preference: ["HUN", "HDR", "1080p", "2160p"]
 library:
-  directory: film
-  search_preference: ["HUN", "HDR", "1080p", "2160p"]
   rules:
   # - expression: missing
   #   modification: grayscale

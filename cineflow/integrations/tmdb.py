@@ -5,7 +5,7 @@ from cineflow.core.logger import log
 from cineflow.utils.misc import fix_imdbid
 from cineflow.core.bases.module import ConsumerBase
 from cineflow.core.schema import (
-    ModuleDefinition, Field, KIND, LIMIT, QUICK_MATCH, consumer_actions,
+    ModuleDefinition, Field, LIMIT, consumer_actions,
 )
 
 
@@ -15,7 +15,7 @@ class Tmdb(ConsumerBase):
     Configuration:
         - token: TMDB API token (required)
         - language: metadata language (default: en-US)
-        - limit: number of items to collect (default: 100)
+        - limit: safety cap of collected items (default: 200)
 
     Functions:
         - get: get media from TMDB API returns the list of media items
@@ -32,7 +32,7 @@ class Tmdb(ConsumerBase):
             Field('token', 'secret', 'API key', "TMDb API key (v3).", required=True),
             Field('language', 'string', 'Language', "Metadata language, e.g. en-US or hu-HU.",
                   default='en-US', step=True),
-            KIND, LIMIT, QUICK_MATCH,
+            LIMIT,
         ),
         actions=consumer_actions('TMDb'),
     )

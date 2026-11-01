@@ -18,13 +18,10 @@ const state = {
   dirty: false,
   issues: [],
   runtime: null,
-  logs: [],
   stepIndex: null,      // selected step
   instanceId: null,     // selected instance in the modules view
   instanceDraft: null,
   instanceIssues: [],
-  settings: null,
-  report: null,
 };
 
 /* ------------------------------------------------------------ utilities */
@@ -119,6 +116,9 @@ async function api(method, path, body) {
   return payload;
 }
 
+/** Fields the GUI shows; hidden ones are only kept when written in YAML. */
+const visible = (specs) => (specs || []).filter((spec) => !spec.hidden);
+
 function moduleDef(id) { return state.catalog.find((item) => item.id === id); }
 function actionDef(moduleId, actionId) {
   const mod = moduleDef(moduleId);
@@ -147,6 +147,153 @@ function fieldIssues(issues) {
 
 /* ------------------------------------------------------- generated forms */
 
+function switchControl(id, checked, onChange) {
+  return h('span', { class: 'switch' },
+    h('input', { id, type: 'checkbox', role: 'switch', checked, onchange: (e) => onChange(e.target.checked) }),
+    h('span', { class: 'slider', 'aria-hidden': 'true' }));
+}
+
+function switchField(id, label, checked, onChange, hint, extra) {
+  return h('div', { class: 'field switch-field' },
+    h('div', { class: 'switch-row' }, h('label', { for: id }, label), switchControl(id, checked, onChange)),
+    hint ? h('div', { class: 'hint' }, hint) : null, extra || null);
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Eye icon for showing a masked value; crossed out while the value is shown. */
+function eyeIcon(crossed) {
+  const paths = ['M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z', 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z'];
+  return strokeIcon(crossed ? [...paths, 'M4 4l16 16'] : paths);
+}
+
+/** Small stroke icon; ``paths`` are SVG path definitions on a 24x24 grid. */
+function strokeIcon(paths) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  paths.forEach((d) => {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  });
+  return svg;
+}
+
+/**
+ * Word list editor: type a word on the left and press Enter (or the arrow) to add it
+ * to the labels on the right. Labels can be dragged into another order and removed with ×.
+ */
+function wordListInput(spec, value, onChange, id, inheritText) {
+  let items = Array.isArray(value) ? value.slice() : [];
+  const numeric = spec.key.endsWith('_ids');
+  const label = spec.label || spec.key;
+  const emptyText = inheritText
+    || (Array.isArray(spec.default) && spec.default.length ? `default: ${spec.default.join(', ')}` : 'No values yet');
+  const chips = h('ul', { class: 'word-chips', 'aria-label': label });
+  let dragFrom = null;
+
+  const commit = () => {
+    onChange(items.length ? items.slice() : undefined);
+    draw();
+  };
+  const move = (from, to) => {
+    if (to < 0 || to >= items.length || from === to) return;
+    const [item] = items.splice(from, 1);
+    items.splice(to, 0, item);
+    commit();
+  };
+  const clearMarks = () => chips.querySelectorAll('.drop-before, .drop-after')
+    .forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+
+  function draw(focusIndex) {
+    chips.replaceChildren(...(items.length ? items.map((item, index) => {
+      const chip = h('li', {
+        class: 'word-chip', draggable: 'true', tabindex: '0',
+        title: 'Drag to reorder. Alt+arrow keys move, Delete removes.',
+        ondragstart: (e) => {
+          dragFrom = index;
+          chip.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(item));
+        },
+        ondragend: () => { dragFrom = null; chip.classList.remove('dragging'); clearMarks(); },
+        ondragover: (e) => {
+          if (dragFrom === null) return;
+          e.preventDefault();
+          const box = chip.getBoundingClientRect();
+          const after = e.clientX > box.left + box.width / 2;
+          clearMarks();
+          chip.classList.add(after ? 'drop-after' : 'drop-before');
+        },
+        ondrop: (e) => {
+          if (dragFrom === null) return;
+          e.preventDefault();
+          const box = chip.getBoundingClientRect();
+          let to = index + (e.clientX > box.left + box.width / 2 ? 1 : 0);
+          if (dragFrom < to) to -= 1;
+          const from = dragFrom;
+          dragFrom = null;
+          move(from, to);
+        },
+        onkeydown: (e) => {
+          if (e.key === 'Delete' || e.key === 'Backspace') {
+            e.preventDefault();
+            items.splice(index, 1);
+            commit();
+            focusChip(Math.min(index, items.length - 1));
+          } else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowUp')) {
+            e.preventDefault();
+            move(index, index - 1);
+            focusChip(Math.max(index - 1, 0));
+          } else if (e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+            move(index, index + 1);
+            focusChip(Math.min(index + 1, items.length - 1));
+          }
+        },
+      },
+      h('span', { class: 'word-text' }, String(item)),
+      h('button', {
+        type: 'button', class: 'word-remove', title: `Remove ${item}`, 'aria-label': `Remove ${item}`,
+        onclick: () => { items.splice(index, 1); commit(); },
+      }, strokeIcon(['M6 6l12 12', 'M18 6L6 18'])));
+      return chip;
+    }) : [h('li', { class: 'word-empty' }, emptyText)]));
+    if (focusIndex !== undefined) focusChip(focusIndex);
+  }
+  function focusChip(index) {
+    const chip = chips.children[index];
+    if (chip && chip.classList.contains('word-chip')) chip.focus();
+  }
+
+  const input = h('input', {
+    id, type: 'text', autocomplete: 'off', placeholder: numeric ? 'Type an ID and press Enter' : 'Type a word and press Enter',
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } },
+    oninput: () => input.setCustomValidity(''),
+  });
+  function add() {
+    const raw = input.value.trim();
+    if (!raw) return;
+    const word = numeric && /^-?\d+$/.test(raw) ? Number(raw) : raw;
+    if (items.some((item) => String(item).toLowerCase() === String(word).toLowerCase())) {
+      input.setCustomValidity('Already in the list');
+      input.reportValidity();
+      return;
+    }
+    items.push(word);
+    input.value = '';
+    commit();
+    input.focus();
+  }
+  draw();
+  return h('div', { class: 'word-list' },
+    h('div', { class: 'word-entry' }, input,
+      h('button', { type: 'button', class: 'word-add', title: 'Add', 'aria-label': `Add to ${label}`, onclick: add },
+        strokeIcon(['M5 12h14', 'M13 6l6 6-6 6']))),
+    chips);
+}
+
 /** Render an input for a field definition. ``onChange`` receives the parsed value or undefined. */
 function fieldInput(spec, value, onChange, opts = {}) {
   const id = `f-${Math.random().toString(36).slice(2)}`;
@@ -156,6 +303,18 @@ function fieldInput(spec, value, onChange, opts = {}) {
     : (spec.default !== null && spec.default !== undefined && !Array.isArray(spec.default) ? `default: ${spec.default}` : '');
   let control;
   const type = spec.type;
+  if (type === 'boolean' && opts.switch) {
+    // a yes/no switch; the default value is stored as "not set"
+    const fallback = spec.default === true;
+    const issues = opts.issues || [];
+    return h('div', { class: `field switch-field${issues.some((i) => i.level === 'error') ? ' has-error' : ''}${opts.wide ? ' wide' : ''}` },
+      h('div', { class: 'switch-row' }, h('label', { for: id }, spec.label || spec.key),
+        switchControl(id, typeof value === 'boolean' ? value : fallback,
+          (checked) => onChange(checked === fallback ? undefined : checked))),
+      spec.description ? h('div', { class: 'hint' }, spec.description) : null,
+      opts.extra || null,
+      fieldIssues(issues));
+  }
   if (type === 'boolean') {
     const current = value === true ? 'true' : value === false ? 'false' : '';
     const defaultText = inherit !== undefined ? inheritText
@@ -183,8 +342,12 @@ function fieldInput(spec, value, onChange, opts = {}) {
         return onChange(Number.isNaN(num) ? raw : num);
       },
     });
+  } else if (type === 'list' && spec.item_type !== 'object'
+      && !(Array.isArray(value) && value.some((item) => item !== null && typeof item === 'object'))) {
+    control = wordListInput(spec, value, onChange, id, inherit !== undefined ? inheritText : '');
   } else if (type === 'list' || type === 'object') {
-    const structured = type === 'object' || (Array.isArray(value) && value.some((item) => typeof item === 'object'));
+    const structured = type === 'object' || spec.item_type === 'object'
+      || (Array.isArray(value) && value.some((item) => typeof item === 'object'));
     const text = value === undefined || value === null ? ''
       : structured ? JSON.stringify(value, null, 2) : value.join('\n');
     control = h('textarea', {
@@ -216,12 +379,20 @@ function fieldInput(spec, value, onChange, opts = {}) {
     });
   }
   if (type === 'secret') {
+    // eye icon inside the field shows or hides the value
     const input = control;
     const toggle = h('button', {
-      class: 'btn', type: 'button', title: 'Show or hide', 'aria-label': 'Show or hide the value',
-      onclick: () => { input.type = input.type === 'password' ? 'text' : 'password'; toggle.textContent = input.type === 'password' ? 'Show' : 'Hide'; },
-    }, 'Show');
-    control = h('div', { class: 'input-group' }, input, toggle);
+      class: 'reveal', type: 'button', title: 'Show value', 'aria-label': 'Show value', 'aria-pressed': 'false',
+      onclick: () => {
+        const shown = input.type === 'password';
+        input.type = shown ? 'text' : 'password';
+        toggle.title = shown ? 'Hide value' : 'Show value';
+        toggle.setAttribute('aria-label', toggle.title);
+        toggle.setAttribute('aria-pressed', String(shown));
+        toggle.replaceChildren(eyeIcon(shown));
+      },
+    }, eyeIcon(false));
+    control = h('div', { class: 'secret-input' }, input, toggle);
   }
   const issues = opts.issues || [];
   const width = opts.wide || type === 'list' || type === 'object' ? ' wide' : (type === 'url' || type === 'secret' ? ' span2' : '');
@@ -240,6 +411,8 @@ async function loadBasics() {
     api('GET', 'catalog'), api('GET', 'instances'), api('GET', 'flows'), api('GET', 'health'),
   ]);
   state.catalog = catalog.modules;
+  state.flowSettings = catalog.flow_settings || [];
+  state.exportDir = catalog.export_directory || '';
   state.instances = instances.instances;
   state.flows = flows.flows;
   state.health = health;
@@ -251,7 +424,10 @@ async function refreshFlows() {
 }
 
 async function refreshInstances() {
+  // keep the last connection test results; the list itself does not carry them
+  const tests = Object.fromEntries(state.instances.map((item) => [item.id, item.test]));
   state.instances = (await api('GET', 'instances')).instances;
+  state.instances.forEach((item) => { if (tests[item.id] && !item.test) item.test = tests[item.id]; });
 }
 
 function renderRuntimeStatus() {
@@ -326,15 +502,15 @@ function setView(view) {
   try { localStorage.setItem('cineflow.view', view); } catch (e) { /* storage unavailable */ }
   document.querySelectorAll('.tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.view === view));
   render();
-  if (view === 'settings') loadSettings();
+  if (view === 'modules') checkModules();
 }
 
 function render() {
+  renderSubnav();
   const app = document.getElementById('app');
   app.replaceChildren();
   if (state.view === 'flows') app.append(renderFlowsView());
-  else if (state.view === 'modules') app.append(renderModulesView());
-  else app.append(renderSettingsView());
+  else app.append(renderModulesView());
 }
 
 /* ================================================================= FLOWS */
@@ -381,85 +557,245 @@ function dropAt(index) {
   }
 }
 
+const MEDIA_KINDS = [['movie', 'Movies'], ['tv', 'TV series']];
+
+/* ------------------------------------------------------------- sub menu */
+
+function flowDot(flow) {
+  let kind = 'ok';
+  let title = 'Enabled';
+  if (flow.runtime && flow.runtime.running) { kind = 'info'; title = 'Running'; }
+  else if (flow.status === 'invalid') { kind = 'err'; title = `${flow.errors} error${flow.errors === 1 ? '' : 's'}`; }
+  else if (flow.enabled === false) { kind = 'off'; title = 'Disabled'; }
+  return h('span', { class: `dot ${kind}`, title, 'aria-hidden': 'true' });
+}
+
+function renderSubnav() {
+  const nav = document.getElementById('subnav');
+  const show = state.view === 'flows' && !document.body.classList.contains('signed-out');
+  nav.hidden = !show;
+  document.body.classList.toggle('has-subnav', show);
+  if (!show) { nav.replaceChildren(); return; }
+  nav.replaceChildren(
+    ...state.flows.map((flow) => {
+      const active = flow.id === state.flowId;
+      const name = (active && state.flow && state.flow.name) || flow.name;
+      return h('button', {
+        type: 'button', class: `subtab${active ? ' active' : ''}`, title: name,
+        'aria-current': active ? 'page' : undefined, onclick: () => selectFlow(flow.id),
+      }, flowDot(flow), h('span', { class: 'subtab-name' }, name),
+      active && state.dirty ? h('span', { class: 'dirty-mark', title: 'Unsaved changes' }, '•') : null);
+    }),
+    h('button', {
+      type: 'button', class: 'subtab add', title: 'New flow', 'aria-label': 'New flow', onclick: openNewFlowDialog,
+    }, '+'));
+}
+
+function openNewFlowDialog() {
+  if (state.dirty && !window.confirm('Discard unsaved flow changes?')) return;
+  const name = h('input', { id: 'new-flow-name', type: 'text', placeholder: 'e.g. Trending movies', autocomplete: 'off' });
+  const desc = h('input', { id: 'new-flow-desc', type: 'text', placeholder: 'optional', autocomplete: 'off' });
+  const kind = h('select', { id: 'new-flow-kind' }, MEDIA_KINDS.map(([value, label]) => h('option', { value }, label)));
+  const delay = h('input', { id: 'new-flow-delay', type: 'number', min: 1, step: 1, value: 60 });
+  const error = h('div', { class: 'field-issue error', role: 'alert' });
+  const create = async () => {
+    if (!name.value.trim()) { error.textContent = 'A name is required.'; name.focus(); return; }
+    const flow = {
+      name: name.value.trim(), enabled: false, delay: Number(delay.value) || 60, priority: 10, kind: kind.value, steps: [],
+    };
+    if (desc.value.trim()) flow.description = desc.value.trim();
+    try {
+      const result = await api('POST', 'flows', { flow });
+      document.getElementById('dialog').close();
+      state.dirty = false;
+      await refreshFlows();
+      await selectFlow(result.id);
+      toast('Flow created. Add steps from the Actions list.', 'ok');
+    } catch (err) { error.textContent = err.message; }
+  };
+  const body = h('div', {
+    class: 'form-grid',
+    onkeydown: (e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); create(); } },
+  },
+  h('div', { class: 'field wide' }, h('label', { for: 'new-flow-name' }, 'Name', h('span', { class: 'req' }, ' *')), name),
+  h('div', { class: 'field wide' }, h('label', { for: 'new-flow-desc' }, 'Description'), desc),
+  h('div', { class: 'field' }, h('label', { for: 'new-flow-kind' }, 'Media kind'), kind),
+  h('div', { class: 'field' }, h('label', { for: 'new-flow-delay' }, 'Run every (minutes)'), delay),
+  h('div', { class: 'wide hint muted small' }, 'The flow starts disabled. Enable it once its steps are ready.'),
+  h('div', { class: 'wide' }, error));
+  openDialog('New flow', body, [
+    h('button', { class: 'btn ghost', onclick: openImportDialog }, 'Import YAML…'),
+    h('span', { class: 'spacer' }),
+    h('button', { class: 'btn', onclick: () => document.getElementById('dialog').close() }, 'Cancel'),
+    h('button', { class: 'btn primary', onclick: create }, 'Create'),
+  ], { narrow: true });
+  name.focus();
+}
+
+/* ------------------------------------------------------------ flow page */
+
 function renderFlowsView() {
-  return h('div', { class: 'layout-flows' },
-    h('div', { class: 'left-col' }, renderFlowList(), renderPalette()),
-    h('section', {}, renderFlowEditor()),
-    h('aside', { class: 'side-panel' }, renderSidePanel()));
+  if (!state.flow) {
+    return h('div', { class: 'panel empty' }, state.flows.length ? 'Select a flow in the menu above.'
+      : h('div', {}, h('p', {}, 'No flows yet.'), h('button', { class: 'btn primary', onclick: openNewFlowDialog }, '+ New flow')));
+  }
+  return h('div', {},
+    renderFlowHeader(),
+    h('div', { class: 'layout-flows' },
+      h('div', { class: 'left-col' }, renderSchedule(), renderFlowSettings(), renderPalette()),
+      h('section', { class: 'steps-col' }, renderSteps(), renderTestPanel()),
+      h('aside', { class: 'side-panel' }, renderSidePanel())));
+}
+
+function updateFlow(key, value) {
+  if (value === undefined) delete state.flow[key]; else state.flow[key] = value;
+  markDirty();
+}
+
+function renderKindSwitch() {
+  const current = state.flow.kind || 'movie';
+  const wrap = h('div', {
+    class: 'segmented', role: 'radiogroup', 'aria-label': 'Media kind', title: 'Media kind of every step in this flow',
+  });
+  MEDIA_KINDS.forEach(([value, label]) => wrap.append(h('button', {
+    type: 'button', role: 'radio', 'aria-checked': String(current === value), class: current === value ? 'active' : '',
+    onclick: () => {
+      if (state.flow.kind === value) return;
+      updateFlow('kind', value);
+      wrap.replaceWith(renderKindSwitch());
+      // the default library folder follows the media kind
+      const card = document.getElementById('flow-settings');
+      if (card) card.replaceWith(renderFlowSettings());
+    },
+  }, label)));
+  return wrap;
+}
+
+function renderFlowHeader() {
+  const flow = state.flow;
+  const runtime = state.runtime || {};
+  return h('div', { class: 'panel flow-head' },
+    h('div', { class: 'flow-title-row' },
+      h('div', { class: 'flow-titles' },
+        h('input', {
+          class: 'title-input', id: 'flow-name', type: 'text', value: flow.name || '', placeholder: 'Flow name',
+          'aria-label': 'Flow name', autocomplete: 'off', spellcheck: 'false',
+          oninput: (e) => { updateFlow('name', e.target.value); renderSubnav(); },
+        }),
+        h('div', { dataset: { issuePath: 'name' } }),
+        h('input', {
+          class: 'desc-input', id: 'flow-desc', type: 'text', value: flow.description || '',
+          placeholder: 'Add a description…', 'aria-label': 'Description', autocomplete: 'off',
+          oninput: (e) => updateFlow('description', e.target.value.trim() ? e.target.value : undefined),
+        })),
+      h('div', { class: 'flow-tools' },
+        renderKindSwitch(),
+        h('div', { class: 'btn-row' },
+          h('button', { class: 'btn primary', id: 'save-flow', onclick: saveFlow }, state.dirty ? 'Save *' : 'Save'),
+          h('button', {
+            class: 'btn', disabled: state.testing || !(flow.steps || []).length,
+            title: 'Run every step with real data but without side effects', onclick: () => runTest(undefined),
+          }, state.testing ? 'Testing…' : 'Test run'),
+          h('button', {
+            class: 'btn', id: 'run-flow', disabled: !state.flowId || state.dirty || !(state.health && state.health.runtime),
+            title: state.dirty ? 'Save the flow first' : 'Run the flow once now', onclick: runFlow,
+          }, runtime.running ? 'Running…' : 'Run now'),
+          h('button', { class: 'btn', disabled: !state.flowId, onclick: exportFlow }, 'Export YAML'),
+          h('button', { class: 'btn danger', disabled: !state.flowId, onclick: deleteFlow }, 'Delete')))),
+    h('div', { id: 'flow-issues' }, renderFlowIssueSummary()));
+}
+
+function renderSchedule() {
+  const flow = state.flow;
+  return h('div', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Schedule')),
+    h('div', { class: 'stack' },
+      switchField('flow-enabled', 'Enabled', flow.enabled !== false, (checked) => { updateFlow('enabled', checked); renderSubnav(); },
+        'Only flows without errors can be enabled.'),
+      h('div', { class: 'field' }, h('label', { for: 'flow-delay' }, 'Run every (minutes)'),
+        h('input', {
+          id: 'flow-delay', type: 'number', min: 1, step: 1, value: flow.delay ?? 60,
+          oninput: (e) => updateFlow('delay', e.target.value === '' ? undefined : Number(e.target.value)),
+        }),
+        h('div', { dataset: { issuePath: 'delay' } })),
+      h('div', { class: 'field' }, h('label', { for: 'flow-priority' }, 'Priority'),
+        h('input', {
+          id: 'flow-priority', type: 'number', step: 1, value: flow.priority ?? 99,
+          oninput: (e) => updateFlow('priority', e.target.value === '' ? undefined : Number(e.target.value)),
+        }),
+        h('div', { class: 'hint' }, 'Lower runs first in sequential mode.'),
+        h('div', { dataset: { issuePath: 'priority' } }))));
+}
+
+/** Flow settings handed to the modules that use them; shown only when a step needs them. */
+function renderFlowSettings() {
+  const flow = state.flow;
+  const used = (setting) => (flow.steps || []).some((step) => isObject(step) && setting.modules.includes(step.module))
+    || !isEmpty(flow[setting.key]);
+  const settings = (state.flowSettings || []).filter(used);
+  if (!settings.length) return h('div', { id: 'flow-settings', hidden: true });
+  const fields = settings.map((setting) => {
+    const spec = setting.field;
+    const issueSlot = h('div', { dataset: { issuePath: setting.key } });
+    if (spec.type === 'path') {
+      const root = state.exportDir ? `${state.exportDir.replace(/\/+$/, '')}/` : '';
+      // a long export path shows only its last folder in front of the input
+      const shortRoot = root.length > 20 ? `…/${root.split('/').filter(Boolean).pop()}/` : root;
+      const where = h('div', { class: 'hint' });
+      const showWhere = () => {
+        const folder = flow[setting.key] || (setting.kind_default ? (flow.kind || 'movie') : '');
+        where.textContent = `Items are created in ${root}${folder}.`;
+      };
+      const input = h('input', {
+        id: `flow-${setting.key}`, type: 'text', autocomplete: 'off', value: flow[setting.key] || '',
+        placeholder: setting.kind_default ? (flow.kind || 'movie') : '',
+        oninput: (e) => { updateFlow(setting.key, e.target.value.trim() || undefined); showWhere(); },
+      });
+      showWhere();
+      return h('div', { class: 'field' },
+        h('label', { for: input.id }, spec.label),
+        h('div', { class: 'prefix-input', title: `Export directory: ${root || 'not known'} (EXPORT_DIRECTORY, set at installation)` },
+          shortRoot ? h('span', { class: 'prefix' }, shortRoot) : null, input),
+        where, issueSlot);
+    }
+    const field = fieldInput(spec, flow[setting.key], (value) => updateFlow(setting.key, value), {});
+    field.classList.remove('wide');
+    field.append(issueSlot);
+    return field;
+  });
+  return h('div', { class: 'panel', id: 'flow-settings' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Library & releases')),
+    h('div', { class: 'stack' }, fields));
 }
 
 function renderPalette() {
-  const filter = h('input', {
-    type: 'text', placeholder: 'Filter actions…', 'aria-label': 'Filter actions', value: state.paletteFilter || '',
-  });
-  const list = h('div', { class: 'palette-list' });
-  const draw = () => {
-    const term = filter.value.trim().toLowerCase();
-    state.paletteFilter = filter.value;
-    list.replaceChildren(...state.catalog.map((mod) => {
-      const actions = mod.actions.filter((action) => !term
-        || `${mod.label} ${action.label} ${action.description}`.toLowerCase().includes(term));
-      if (!actions.length) return null;
-      return h('div', { class: 'palette-group' },
-        h('div', { class: 'palette-module' }, moduleBadge(mod), h('span', { class: 'grow' }, mod.label),
-          moduleNeedsSetup(mod) ? h('button', {
-            class: 'pill warn as-button', title: `Configure ${mod.label}`, onclick: () => openInstanceDialog(mod.id),
-          }, 'set up') : null),
-        actions.map((action) => h('div', {
-          class: `chip ${categoryClass(mod)}`, draggable: 'true', tabindex: '0', role: 'button',
-          title: `${action.description}\nDrag into the flow, or click to append.`,
-          ondragstart: (e) => startDrag(e, { type: 'action', module: mod.id, action: action.id }),
-          ondragend: endDrag,
-          onclick: () => {
-            if (!state.flow) { toast('Open or create a flow first.'); return; }
-            insertStep(mod.id, action.id, state.flow.steps.length);
-          },
-          onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } },
-        }, h('span', { class: 'grow' }, action.label),
-        action.side_effects ? h('span', { class: 'chip-flag', title: 'Changes external state; skipped in test runs' }, '⚡') : null)));
-    }).filter(Boolean));
-  };
-  filter.addEventListener('input', draw);
-  draw();
-  return h('div', { class: 'panel palette' },
+  const panel = h('div', { class: 'panel palette' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Actions')),
-    h('p', { class: 'muted small' }, 'Drag an action into the flow, or click it to append.'),
-    h('div', { class: 'field' }, filter),
-    list);
-}
-
-function renderFlowList() {
-  return h('aside', { class: 'panel' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Flows'), h('span', { class: 'spacer' }),
-      h('button', { class: 'btn small', title: 'Import a flow from YAML', onclick: openImportDialog }, 'Import'),
-      h('button', { class: 'btn primary small', onclick: newFlow }, '+ New')),
-    state.flows.length ? h('ul', { class: 'list' }, state.flows.map((flow) => h('li', {},
-      h('button', {
-        class: `list-item${flow.id === state.flowId ? ' active' : ''}`,
-        onclick: () => selectFlow(flow.id),
-      },
-      h('span', { class: 'title' }, flow.name),
-      h('span', { class: 'meta' },
-        flow.enabled === false ? h('span', { class: 'pill' }, 'disabled') : h('span', { class: 'pill info' }, `every ${flow.delay} min`),
-        flow.status === 'invalid' ? h('span', { class: 'pill err' }, `${flow.errors} error${flow.errors === 1 ? '' : 's'}`) : null,
-        flow.runtime && flow.runtime.running ? h('span', { class: 'pill info' }, 'running') : null,
-        flow.runtime && flow.runtime.last_status ? statusPill(flow.runtime.last_status) : null))))) :
-      h('div', { class: 'empty' }, 'No flows yet.'));
-}
-
-function newFlow() {
-  if (state.dirty && !window.confirm('Discard unsaved flow changes?')) return;
-  state.flowId = null;
-  state.flow = { name: 'New flow', enabled: false, delay: 60, priority: 10, steps: [] };
-  state.revision = null;
-  state.dirty = true;
-  state.issues = [];
-  state.runtime = null;
-  state.logs = [];
-  state.stepIndex = null;
-  state.test = null;
-  render();
-  scheduleValidation();
+    h('p', { class: 'muted small' }, 'Open a module, then drag an action into the flow or click it to append.'));
+  const list = h('div', { class: 'palette-list' });
+  state.catalog.forEach((mod) => {
+    const open = state.openModule === mod.id;
+    list.append(h('div', { class: `palette-group ${categoryClass(mod)}${open ? ' open' : ''}` },
+      h('div', { class: 'palette-row' },
+        h('button', {
+          type: 'button', class: 'palette-module', 'aria-expanded': String(open),
+          onclick: () => { state.openModule = open ? null : mod.id; panel.replaceWith(renderPalette()); },
+        }, moduleBadge(mod), h('span', { class: 'grow' }, mod.label), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')),
+        moduleNeedsSetup(mod) ? h('button', {
+          class: 'pill warn as-button', title: `Configure ${mod.label}`, onclick: () => openInstanceDialog(mod.id),
+        }, 'set up') : null),
+      open ? h('div', { class: 'palette-actions' }, mod.actions.map((action) => h('div', {
+        class: `chip ${categoryClass(mod)}`, draggable: 'true', tabindex: '0', role: 'button',
+        title: `${action.description}\nDrag into the flow, or click to append.`,
+        ondragstart: (e) => startDrag(e, { type: 'action', module: mod.id, action: action.id }),
+        ondragend: endDrag,
+        onclick: () => insertStep(mod.id, action.id, state.flow.steps.length),
+        onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } },
+      }, h('span', { class: 'grow' }, action.label),
+      action.side_effects ? h('span', { class: 'chip-flag', title: 'Changes external state; skipped in test runs' }, '⚡') : null))) : null));
+  });
+  panel.append(list);
+  return panel;
 }
 
 async function selectFlow(id) {
@@ -473,19 +809,20 @@ async function selectFlow(id) {
     state.runtime = data.runtime;
     state.dirty = false;
     state.stepIndex = null;
-    state.logs = [];
     if (id !== state.testFlowId) state.test = null;
     state.testFlowId = id;
+    try { localStorage.setItem('cineflow.flow', id); } catch (e) { /* storage unavailable */ }
     render();
-    loadLogs();
   } catch (err) {
     toast(err.message, 'err');
   }
 }
 
 function markDirty() {
+  const wasDirty = state.dirty;
   state.dirty = true;
   if (state.test) state.testStale = true;
+  if (!wasDirty) renderSubnav();
   scheduleValidation();
 }
 
@@ -519,71 +856,29 @@ function updateIssueViews() {
   });
   const save = document.getElementById('save-flow');
   if (save) save.textContent = state.dirty ? 'Save *' : 'Save';
+  const run = document.getElementById('run-flow');
+  if (run && state.dirty) { run.disabled = true; run.title = 'Save the flow first'; }
 }
 
 function renderFlowIssueSummary() {
   const errors = state.issues.filter((i) => i.level === 'error').length;
   const warnings = state.issues.filter((i) => i.level === 'warning').length;
-  const flowLevel = state.issues.filter((i) => i.path[0] !== 'steps' || i.path.length === 1);
+  const flowLevel = state.issues.filter((i) => (i.path[0] !== 'steps' || i.path.length === 1)
+    && !['name', 'delay', 'priority'].includes(String(i.path[0])));
   return h('div', {},
     h('div', { class: 'btn-row' },
       errors ? h('span', { class: 'pill err' }, `${errors} error${errors === 1 ? '' : 's'}`) : h('span', { class: 'pill ok' }, 'valid'),
       warnings ? h('span', { class: 'pill warn' }, `${warnings} warning${warnings === 1 ? '' : 's'}`) : null,
       state.dirty ? h('span', { class: 'pill info' }, 'unsaved') : null),
-    flowLevel.length ? h('div', { class: 'small' }, issueList(flowLevel)) : null);
+    flowLevel.length ? h('div', { class: 'small section-gap' }, issueList(flowLevel)) : null);
 }
 
-function renderFlowEditor() {
-  if (!state.flow) {
-    return h('div', { class: 'panel empty' }, 'Select a flow or create a new one.');
-  }
-  const flow = state.flow;
-  const update = (key, value) => { if (isEmpty(value) && key === 'description') delete flow[key]; else flow[key] = value; markDirty(); };
-  const runtime = state.runtime || {};
-  return h('div', {},
-    h('div', { class: 'panel' },
-      h('div', { class: 'panel-head' },
-        h('h2', {}, state.flowId ? flow.name || state.flowId : 'New flow'),
-        h('span', { class: 'spacer' }),
-        h('div', { class: 'btn-row' },
-          h('button', { class: 'btn primary', id: 'save-flow', onclick: saveFlow }, state.dirty ? 'Save *' : 'Save'),
-          h('button', {
-            class: 'btn', disabled: state.testing || !(flow.steps || []).length,
-            title: 'Run every step with real data but without side effects', onclick: () => runTest(undefined),
-          }, state.testing ? 'Testing…' : 'Test run'),
-          h('button', {
-            class: 'btn', disabled: !state.flowId || state.dirty || !(state.health && state.health.runtime),
-            title: state.dirty ? 'Save the flow first' : 'Run the flow once now', onclick: runFlow,
-          }, runtime.running ? 'Running…' : 'Run now'),
-          h('button', { class: 'btn', disabled: !state.flowId, onclick: exportFlow }, 'Export YAML'),
-          h('button', { class: 'btn danger', disabled: !state.flowId, onclick: deleteFlow }, 'Delete'))),
-      h('div', { class: 'form-grid' },
-        h('div', { class: 'field wide' }, h('label', { for: 'flow-name' }, 'Name'),
-          h('input', { id: 'flow-name', type: 'text', value: flow.name || '', oninput: (e) => update('name', e.target.value) }),
-          h('div', { dataset: { issuePath: 'name' } })),
-        h('div', { class: 'field wide' }, h('label', { for: 'flow-desc' }, 'Description'),
-          h('input', { id: 'flow-desc', type: 'text', value: flow.description || '', oninput: (e) => update('description', e.target.value) })),
-        h('div', { class: 'field' }, h('label', { for: 'flow-delay' }, 'Run every (minutes)'),
-          h('input', { id: 'flow-delay', type: 'number', min: 1, step: 1, value: flow.delay ?? 60,
-            oninput: (e) => update('delay', e.target.value === '' ? undefined : Number(e.target.value)) }),
-          h('div', { dataset: { issuePath: 'delay' } })),
-        h('div', { class: 'field' }, h('label', { for: 'flow-priority' }, 'Priority'),
-          h('input', { id: 'flow-priority', type: 'number', step: 1, value: flow.priority ?? 99,
-            oninput: (e) => update('priority', e.target.value === '' ? undefined : Number(e.target.value)) }),
-          h('div', { class: 'hint' }, 'Lower runs first in sequential mode.'),
-          h('div', { dataset: { issuePath: 'priority' } })),
-        h('div', { class: 'field' }, h('span', { class: 'label' }, 'State'),
-          h('label', { class: 'check' }, h('input', {
-            type: 'checkbox', checked: flow.enabled !== false, onchange: (e) => update('enabled', e.target.checked),
-          }), 'Enabled'),
-          h('div', { class: 'hint' }, 'Only flows without errors can be enabled.'))),
-      h('div', { id: 'flow-issues', class: 'section-gap' }, renderFlowIssueSummary())),
-    h('div', { class: 'panel' },
-      h('div', { class: 'panel-head' }, h('h2', {}, 'Steps'), h('span', { class: 'spacer' }),
-        h('span', { class: 'muted small' }, 'Drag to reorder · drop actions between steps · click to configure')),
-      renderPipeline(),
-      h('button', { class: 'add-step', onclick: () => openCatalogDialog() }, '+ Add action')),
-    renderTestPanel());
+function renderSteps() {
+  return h('div', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Steps'), h('span', { class: 'spacer' }),
+      h('span', { class: 'muted small' }, 'Drag to reorder · click to configure')),
+    renderPipeline(),
+    h('button', { class: 'add-step', onclick: () => openCatalogDialog() }, '+ Add action'));
 }
 
 function stepSummary(step, index) {
@@ -702,7 +997,6 @@ function renderCard(step, index, total) {
     h('div', { class: 'step-meta' },
       h('span', { class: 'pill' }, stepSummary(step, index) || 'no input'),
       action && action.destructive ? h('span', { class: 'pill warn' }, 'destructive') : null,
-      step.config && step.config.kind === 'tv' ? h('span', { class: 'pill info' }, 'TV') : null,
       needsSetup ? h('button', {
         class: 'pill err as-button', title: `Configure ${mod.label}`,
         onclick: (e) => { e.stopPropagation(); openInstanceDialog(instance.id); },
@@ -745,7 +1039,7 @@ function removeStep(index) {
 }
 
 function selectStep(index) {
-  state.stepIndex = index;
+  state.stepIndex = state.stepIndex === index ? null : index;
   render();
 }
 
@@ -847,49 +1141,26 @@ function buildInput(model) {
 
 /* ------------------------------------------------------------ side panel */
 
+/** Collapsed section for options a regular user rarely needs; open when one is in use. */
+function moreOptions(children, open, extraClass = '') {
+  if (!children.length) return null;
+  return h('details', { class: `section more-options ${extraClass}`, open },
+    h('summary', {}, 'More options'), h('div', { class: 'form-grid' }, children));
+}
+
+/** Basic fields in a grid, advanced ones in a collapsed "More options" section. */
+function fieldGroup(allSpecs, render, inUse) {
+  const specs = visible(allSpecs);
+  const advanced = specs.filter((spec) => spec.advanced);
+  return [
+    h('div', { class: 'form-grid' }, specs.filter((spec) => !spec.advanced).map(render)),
+    moreOptions(advanced.map(render), advanced.some(inUse)),
+  ];
+}
+
 function renderSidePanel() {
-  if (!state.flow) return h('div', { class: 'panel muted' }, 'Flow details appear here.');
   if (state.stepIndex !== null && state.flow.steps[state.stepIndex]) return renderStepEditor(state.stepIndex);
-  return renderRuntimePanel();
-}
-
-function renderRuntimePanel() {
-  const runtime = state.runtime;
-  return h('div', {},
-    h('div', { class: 'panel' },
-      h('div', { class: 'panel-head' }, h('h2', {}, 'Runtime'), h('span', { class: 'spacer' }),
-        h('button', { class: 'btn small', disabled: !state.flowId, onclick: refreshRuntime }, 'Refresh')),
-      !state.flowId ? h('div', { class: 'muted' }, 'Save the flow to run it.') :
-        !runtime ? h('div', { class: 'muted' }, 'The web GUI runs without the flow runtime.') :
-          !runtime.loaded ? h('div', { class: 'muted' }, 'Not loaded by the runtime yet.') :
-            h('dl', { class: 'kv' },
-              h('dt', {}, 'State'), h('dd', {}, runtime.running ? h('span', { class: 'pill info' }, 'running') : 'idle'),
-              h('dt', {}, 'Last result'), h('dd', {}, runtime.last_status ? statusPill(runtime.last_status) : '—'),
-              h('dt', {}, 'Last start'), h('dd', {}, fmtTime(runtime.last_start)),
-              h('dt', {}, 'Last end'), h('dd', {}, fmtTime(runtime.last_end)),
-              runtime.last_step ? [h('dt', {}, 'Last step'), h('dd', {}, runtime.last_step)] : null,
-              runtime.last_error ? [h('dt', {}, 'Error'), h('dd', { class: 'field-issue error' }, runtime.last_error)] : null,
-              h('dt', {}, 'Mode'), h('dd', {}, runtime.mode),
-              runtime.next_due ? [h('dt', {}, 'Next run'), h('dd', {}, fmtTime(runtime.next_due))] : null)),
-    h('div', { class: 'panel' },
-      h('div', { class: 'panel-head' }, h('h2', {}, 'Recent messages'), h('span', { class: 'spacer' }),
-        h('button', { class: 'btn small', disabled: !state.flowId, onclick: loadLogs }, 'Reload')),
-      h('div', { class: 'logs', id: 'logs' }, renderLogs())));
-}
-
-function renderLogs() {
-  if (!state.logs.length) return h('div', { class: 'muted small' }, 'No messages since start.');
-  return state.logs.slice().reverse().map((line) => h('div', { class: `log-line ${line.level}` },
-    `${line.time.slice(11)} ${line.level.padEnd(7)} ${line.message}`));
-}
-
-async function loadLogs() {
-  if (!state.flowId) return;
-  try {
-    state.logs = (await api('GET', `flows/${encodeURIComponent(state.flowId)}/logs`)).logs;
-    const el = document.getElementById('logs');
-    if (el) el.replaceChildren(...[renderLogs()].flat());
-  } catch (err) { /* ignore */ }
+  return h('div', { class: 'panel muted small' }, 'Select a step to edit its settings.');
 }
 
 async function refreshRuntime() {
@@ -898,9 +1169,35 @@ async function refreshRuntime() {
     const data = await api('GET', `flows/${encodeURIComponent(state.flowId)}`);
     state.runtime = data.runtime;
     await refreshFlows();
-    await loadLogs();
-    if (state.stepIndex === null) render();
+    renderSubnav();
+    const run = document.getElementById('run-flow');
+    if (run && !state.dirty) run.textContent = state.runtime && state.runtime.running ? 'Running…' : 'Run now';
   } catch (err) { /* ignore */ }
+}
+
+/** Coloured module label: green when the step's module can be used. */
+function moduleIndicator(step, mod) {
+  const instance = step.instance ? instanceById(step.instance) : instanceById(step.module);
+  const configurable = Boolean(mod && mod.fields.length);
+  const ready = Boolean(mod) && (!configurable || Boolean(instance && instance.status === 'valid'));
+  const label = mod ? mod.label : step.module || '?';
+  let title = `${label} is ready. Click to open its settings.`;
+  if (!mod) title = 'Unknown module';
+  else if (!configurable) title = `${label} needs no settings.`;
+  else if (!ready) title = `${label} needs settings before this step can run. Click to configure.`;
+  const content = [h('span', { class: 'dot', 'aria-hidden': 'true' }), label,
+    instance && !instance.default ? ` · ${instance.name}` : ''];
+  const cls = `module-indicator ${ready ? 'ok' : 'err'}`;
+  if (configurable && instance) {
+    return h('button', { type: 'button', class: cls, title, onclick: () => openInstanceDialog(instance.id) }, content);
+  }
+  return h('span', { class: cls, title }, content);
+}
+
+function settingText(value) {
+  if (Array.isArray(value)) return value.join(', ');
+  if (isObject(value)) return JSON.stringify(value);
+  return String(value);
 }
 
 function renderStepEditor(index) {
@@ -913,18 +1210,15 @@ function renderStepEditor(index) {
   const panel = h('div', { class: 'panel' });
   const rerender = () => { const side = panel.parentElement; if (side) side.replaceChildren(renderStepEditor(index)); };
 
-  // header
+  // header: the module indicator replaces the old test and close buttons
   panel.append(h('div', { class: 'panel-head' },
-    moduleBadge(mod), h('h2', {}, `Step ${index + 1}`), h('span', { class: 'spacer' }),
-    h('button', { class: 'btn small', disabled: state.testing, title: 'Run the flow up to this step with real data, without side effects',
-      onclick: () => runTest(index) }, '▶ Test to here'),
-    h('button', { class: 'btn small ghost', onclick: () => { state.stepIndex = null; render(); } }, 'Close')));
+    h('h2', {}, `Step ${index + 1}`), h('span', { class: 'spacer' }), moduleIndicator(step, mod)));
   panel.append(h('div', { id: 'step-issues' }, issueList(stepIssues) || ''));
 
-  // name, module, action, instance
+  // name, action
   let nameBefore = step.name;
   panel.append(h('div', { class: 'form-grid' },
-    h('div', { class: 'field wide' }, h('label', { for: 'step-name' }, 'Step name'),
+    h('div', { class: 'field wide' }, h('label', { for: 'step-name' }, 'Name'),
       h('input', {
         id: 'step-name', type: 'text', value: step.name || '',
         oninput: (e) => { step.name = e.target.value; markDirty(); },
@@ -932,8 +1226,7 @@ function renderStepEditor(index) {
       }),
       h('div', { class: 'hint' }, 'Later steps refer to this step by its name.'),
       fieldIssues(at('name'))),
-    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Module'), h('div', {}, mod ? mod.label : step.module)),
-    h('div', { class: 'field' }, h('label', { for: 'step-action' }, 'Action'),
+    h('div', { class: 'field wide' }, h('label', { for: 'step-action' }, 'Action'),
       (() => {
         const select = h('select', {
           id: 'step-action',
@@ -943,9 +1236,8 @@ function renderStepEditor(index) {
         select.value = step.action;
         return select;
       })(),
-      fieldIssues(at('action'))),
-    renderInstanceSelect(step, mod, at('instance'), rerender)));
-  if (action) panel.append(h('p', { class: 'muted small' }, action.description));
+      action ? h('div', { class: 'hint' }, action.description) : null,
+      fieldIssues(at('action')))));
 
   // input
   panel.append(h('div', { class: 'section-title' }, 'Input'));
@@ -955,100 +1247,88 @@ function renderStepEditor(index) {
   const parsed = parseInput(step.input);
   if (action && action.arguments.length && parsed.mode === 'form') {
     panel.append(h('div', { class: 'section-title' }, 'Arguments'));
-    panel.append(h('div', { class: 'form-grid' }, action.arguments.map((spec) => fieldInput(spec, parsed.args[spec.key], (value) => {
+    panel.append(...fieldGroup(action.arguments, (spec) => fieldInput(spec, parsed.args[spec.key], (value) => {
       const model = parseInput(step.input);
       if (value === undefined) delete model.args[spec.key]; else model.args[spec.key] = value;
       step.input = buildInput(model);
       if (step.input === undefined) delete step.input;
       markDirty();
-    }, { issues: at('input', spec.key) }))));
+    }, { issues: at('input', spec.key), switch: true }),
+    (spec) => parsed.args[spec.key] !== undefined || at('input', spec.key).length > 0).filter(Boolean));
   }
 
-  // settings: action fields + overridable module fields
-  if (mod) {
-    const config = step.config || {};
-    const base = step.instance ? (instanceById(step.instance) || {}).config || {} : (instanceById(step.module) || {}).config || {};
-    const setConfig = (key, value) => {
-      const next = clone(step.config) || {};
-      setPath(next, key, value);
-      if (isEmpty(next)) delete step.config; else step.config = next;
-      markDirty();
-    };
-    const actionFields = action ? action.fields : [];
-    const stepFields = mod.fields.filter((spec) => spec.step);
-    if (actionFields.length || stepFields.length) {
-      panel.append(h('div', { class: 'section-title' }, 'Step settings'));
-      panel.append(h('div', { class: 'form-grid' },
-        actionFields.map((spec) => fieldInput(spec, getPath(config, spec.key), (value) => setConfig(spec.key, value),
-          { issues: at('config', spec.key) })),
-        stepFields.map((spec) => {
-          const inherited = getPath(base, spec.key);
-          return fieldInput(spec, getPath(config, spec.key), (value) => setConfig(spec.key, value), {
-            issues: at('config', spec.key),
-            inherit: inherited !== undefined ? (Array.isArray(inherited) ? inherited.join(', ') : String(inherited))
-              : spec.default !== null && spec.default !== undefined ? String(spec.default) : '',
-          });
-        })));
-    }
-    const known = new Set([...mod.fields, ...actionFields].map((spec) => spec.key.split('.')[0]));
-    const other = Object.keys(config).filter((key) => !known.has(key));
-    const moduleIssues = stepIssues.filter((issue) => issue.path[2] === 'config'
-      && !actionFields.concat(stepFields).some((spec) => spec.key === issue.path.slice(3).join('.')));
-    if (other.length || moduleIssues.length) {
-      panel.append(h('details', { class: 'section', open: moduleIssues.length > 0 },
-        h('summary', {}, 'Other settings'),
-        h('p', { class: 'muted small' }, 'Settings without a form field, as JSON. Connection settings belong to the module instance.'),
-        fieldIssues(moduleIssues),
-        h('textarea', {
-          class: 'code', value: JSON.stringify(Object.fromEntries(other.map((key) => [key, config[key]])), null, 2),
-          onchange: (e) => {
-            try {
-              const extra = e.target.value.trim() ? JSON.parse(e.target.value) : {};
-              const next = clone(step.config) || {};
-              other.forEach((key) => delete next[key]);
-              Object.assign(next, extra);
-              if (isEmpty(next)) delete step.config; else step.config = next;
-              markDirty();
-            } catch (err) { toast('Invalid JSON in other settings.', 'err'); }
-          },
-        })));
-    }
-  }
+  if (mod) panel.append(...renderStepSettings(step, mod, action, stepIssues, at, rerender));
   return panel;
 }
 
-function renderInstanceSelect(step, mod, issues, rerender) {
-  if (!mod || !mod.fields.length) return null;
-  const options = state.instances.filter((item) => item.module === step.module);
-  const current = step.instance ? instanceById(step.instance) : instanceById(step.module);
-  const select = h('select', {
-    id: 'step-instance',
-    onchange: (e) => {
-      if (e.target.value === '__new__') {
-        e.target.value = step.instance || '';
-        createInstance(mod, (id) => { step.instance = id; markDirty(); render(); });
-        return;
-      }
-      if (e.target.value === '' || e.target.value === step.module) delete step.instance;
-      else step.instance = e.target.value;
-      markDirty();
-      rerender();
-    },
-  }, options.map((item) => h('option', {
-    value: item.default ? '' : item.id,
-    disabled: !item.default && item.status !== 'valid',
-  }, `${item.name}${item.status !== 'valid' ? ` (${item.status})` : ''}`)),
-  h('option', { value: '__new__' }, '+ New instance…'));
-  select.value = step.instance || '';
-  const ready = current && current.status === 'valid';
-  return h('div', { class: 'field wide' }, h('label', { for: 'step-instance' }, 'Connection'),
-    h('div', { class: 'input-group' }, select,
-      current ? h('button', { class: 'btn', type: 'button', onclick: () => openInstanceDialog(current.id) }, 'Configure') : null),
-    current ? h('div', { class: `connection-state ${ready ? 'ok' : 'err'}` },
-      statusPill(current.status),
-      current.test ? h('span', { class: `pill ${current.test.ok ? 'ok' : 'err'}` }, current.test.ok ? 'connected' : 'test failed') : null,
-      h('span', { class: 'small' }, ready ? `Uses ${current.name}.` : `${current.name} needs settings before this step can run.`)) : null,
-    fieldIssues(issues));
+/** Action settings, plus module settings the step still overrides (set, or needed). */
+function renderStepSettings(step, mod, action, stepIssues, at, rerender) {
+  const parts = [];
+  const config = step.config || {};
+  const setConfig = (key, value) => {
+    const next = clone(step.config) || {};
+    setPath(next, key, value);
+    if (isEmpty(next)) delete step.config; else step.config = next;
+    markDirty();
+  };
+  const actionFields = action ? action.fields : [];
+  if (actionFields.length) {
+    parts.push(h('div', { class: 'section-title' }, 'Settings'));
+    parts.push(...fieldGroup(actionFields, (spec) => fieldInput(spec, getPath(config, spec.key),
+      (value) => setConfig(spec.key, value), { issues: at('config', spec.key), switch: true }),
+    (spec) => getPath(config, spec.key) !== undefined || at('config', spec.key).length > 0).filter(Boolean));
+  }
+  // module settings live in the module; show only those this step sets or must set
+  // (credentials and other module-only fields are fixed in the module settings)
+  const overrides = visible(mod.fields).filter((spec) => getPath(config, spec.key) !== undefined
+    || (spec.step && spec.type !== 'secret' && at('config', spec.key).length));
+  if (overrides.length || step.instance) {
+    parts.push(h('div', { class: 'section-title' }, 'Module settings on this step'));
+    parts.push(h('p', { class: 'muted small' }, 'Module settings belong to the module. Remove a value here to use the module.'));
+    if (step.instance) {
+      const instance = instanceById(step.instance);
+      parts.push(h('div', { class: 'override-row' },
+        h('span', { class: 'grow' }, h('strong', {}, 'Connection: '), instance ? instance.name : `${step.instance} (missing)`),
+        h('button', { class: 'btn small', onclick: () => { delete step.instance; markDirty(); rerender(); } }, 'Use module')));
+    }
+    parts.push(h('div', { class: 'form-grid' }, overrides.map((spec) => {
+      const set = getPath(config, spec.key) !== undefined;
+      return fieldInput(spec, getPath(config, spec.key), (value) => setConfig(spec.key, value), {
+        issues: at('config', spec.key),
+        switch: true,
+        wide: true,
+        extra: set ? h('button', {
+          class: 'btn small ghost remove-override', title: `Use the module value instead of ${settingText(getPath(config, spec.key))}`,
+          onclick: () => { setConfig(spec.key, undefined); rerender(); },
+        }, 'Use module value') : null,
+      });
+    })));
+  }
+  const known = new Set([...mod.fields, ...actionFields].map((spec) => spec.key.split('.')[0]));
+  const other = Object.keys(config).filter((key) => !known.has(key));
+  // module field issues are listed at the top and fixed in the module settings
+  const shown = new Set([...actionFields, ...mod.fields].map((spec) => spec.key));
+  const otherIssues = stepIssues.filter((issue) => issue.path[2] === 'config' && !shown.has(issue.path.slice(3).join('.')));
+  if (other.length || otherIssues.length) {
+    parts.push(h('details', { class: 'section', open: otherIssues.length > 0 },
+      h('summary', {}, 'Other settings'),
+      h('p', { class: 'muted small' }, 'Settings without a form field, as JSON.'),
+      fieldIssues(otherIssues),
+      h('textarea', {
+        class: 'code', value: JSON.stringify(Object.fromEntries(other.map((key) => [key, config[key]])), null, 2),
+        onchange: (e) => {
+          try {
+            const extra = e.target.value.trim() ? JSON.parse(e.target.value) : {};
+            const next = clone(step.config) || {};
+            other.forEach((key) => delete next[key]);
+            Object.assign(next, extra);
+            if (isEmpty(next)) delete step.config; else step.config = next;
+            markDirty();
+          } catch (err) { toast('Invalid JSON in other settings.', 'err'); }
+        },
+      })));
+  }
+  return parts;
 }
 
 function renderInputEditor(step, index, action, earlier, at, rerender) {
@@ -1112,7 +1392,7 @@ function renderInputEditor(step, index, action, earlier, at, rerender) {
   }
 
   if (takesQuery) {
-    const queryFields = action ? action.query : [];
+    const queryFields = action ? visible(action.query) : [];
     const queryObj = isObject(model.query) ? model.query : {};
     if (typeof model.query === 'string' || !queryFields.length) {
       wrap.append(h('div', { class: 'field wide' }, h('label', { for: 'query-text' }, 'Search text'),
@@ -1124,19 +1404,19 @@ function renderInputEditor(step, index, action, earlier, at, rerender) {
         fieldIssues(at('input', 'query'))));
     }
     if (queryFields.length && typeof model.query !== 'string') {
-      wrap.append(h('div', { class: 'field wide' }, h('span', { class: 'label' }, 'Query')));
-      queryFields.forEach((spec) => {
-        wrap.append(fieldInput(spec, queryObj[spec.key], (value) => {
-          const next = isObject(model.query) ? { ...model.query } : {};
-          if (value === undefined) delete next[spec.key]; else next[spec.key] = value;
-          model.query = isEmpty(next) ? undefined : next;
-          commit(model);
-        }, { issues: at('input', 'query', spec.key), placeholder: '' }));
-      });
+      const queryInput = (spec) => fieldInput(spec, queryObj[spec.key], (value) => {
+        const next = isObject(model.query) ? { ...model.query } : {};
+        if (value === undefined) delete next[spec.key]; else next[spec.key] = value;
+        model.query = isEmpty(next) ? undefined : next;
+        commit(model);
+      }, { issues: at('input', 'query', spec.key), placeholder: '', switch: true });
+      const basic = queryFields.filter((spec) => !spec.advanced);
+      if (basic.length) wrap.append(h('div', { class: 'field wide' }, h('span', { class: 'label' }, 'Filters')));
+      basic.forEach((spec) => wrap.append(queryInput(spec)));
       const known = new Set(queryFields.map((spec) => spec.key));
       const extra = Object.fromEntries(Object.entries(queryObj).filter(([key]) => !known.has(key)));
-      wrap.append(h('details', { class: 'section wide', open: !isEmpty(extra) },
-        h('summary', {}, 'Additional query parameters'),
+      const advanced = queryFields.filter((spec) => spec.advanced);
+      const raw = h('div', { class: 'field wide' }, h('label', {}, 'Other parameters (JSON)'),
         h('textarea', {
           class: 'code', value: isEmpty(extra) ? '' : JSON.stringify(extra, null, 2), placeholder: '{"key": "value"}',
           onchange: (e) => {
@@ -1148,7 +1428,10 @@ function renderInputEditor(step, index, action, earlier, at, rerender) {
               commit(model);
             } catch (err) { toast('Invalid JSON in query parameters.', 'err'); }
           },
-        })));
+        }));
+      wrap.append(moreOptions(advanced.map(queryInput).concat(raw),
+        !isEmpty(extra) || advanced.some((spec) => queryObj[spec.key] !== undefined
+          || at('input', 'query', spec.key).length), 'wide'));
     }
   }
   if (!wrap.children.length) wrap.append(h('div', { class: 'muted small wide' }, 'This action takes no input.'));
@@ -1292,14 +1575,15 @@ async function deleteFlow() {
     state.flowId = null; state.flow = null; state.dirty = false; state.stepIndex = null;
     await refreshFlows();
     toast('Flow deleted.', 'ok');
-    render();
+    if (state.flows.length) await selectFlow(state.flows[0].id); else render();
   } catch (err) { toast(err.message, 'err'); }
 }
 
 /* ----------------------------------------------------------------- dialogs */
 
-function openDialog(title, body, footer) {
+function openDialog(title, body, footer, opts = {}) {
   const dialog = document.getElementById('dialog');
+  dialog.classList.toggle('narrow', Boolean(opts.narrow));
   dialog.replaceChildren(
     h('div', { class: 'dialog-head' }, h('h2', {}, title),
       h('button', { class: 'btn ghost', 'aria-label': 'Close', onclick: () => dialog.close() }, '✕')),
@@ -1358,37 +1642,73 @@ function openImportDialog() {
 
 /* ================================================================ MODULES */
 
-function renderModulesView() {
-  const grid = h('div', { class: 'module-grid' }, state.catalog.map((mod) => {
+const MODULE_CHECK_INTERVAL = 60000;
+
+/** State badge of a module: ready, incomplete, invalid or unreachable. */
+function moduleState(mod, instance) {
+  if (!mod.fields.length) return { kind: 'ok', label: 'ready', title: 'No settings needed.' };
+  if (!instance || instance.status === 'incomplete') {
+    return { kind: 'warn', label: 'incomplete', title: 'Some required settings are missing.' };
+  }
+  if (instance.status !== 'valid') return { kind: 'err', label: 'invalid', title: 'Some settings have wrong values.' };
+  if (instance.test && !instance.test.ok) return { kind: 'err', label: 'unreachable', title: instance.test.message };
+  return { kind: 'ok', label: 'ready', title: instance.test ? instance.test.message : 'Settings are complete.' };
+}
+
+function renderModuleGrid() {
+  // modules without settings (such as Tools) have nothing to show here
+  const modules = state.catalog.filter((mod) => mod.fields.length);
+  return h('div', { class: 'module-grid', id: 'module-grid' }, modules.map((mod) => {
     const instances = state.instances.filter((item) => item.module === mod.id);
-    return h('div', { class: `panel module-card ${categoryClass(mod)}` },
-      h('div', { class: 'module-head' }, moduleBadge(mod),
-        h('div', { class: 'grow' }, h('div', { class: 'category' }, mod.category), h('h3', {}, mod.label))),
-      h('div', { class: 'muted small' }, mod.description),
-      mod.fields.length ? h('div', { class: 'list' }, instances.map((item) => h('div', { class: 'instance-line' },
-        h('button', {
-          class: `instance-row${item.id === state.instanceId ? ' active' : ''}`,
-          onclick: () => selectInstance(item.id),
-        }, h('span', { class: 'name' }, item.name), statusPill(item.status),
-        item.test ? h('span', { class: `pill ${item.test.ok ? 'ok' : 'err'}`, title: item.test.message },
-          item.test.ok ? 'connected' : 'test failed') : null),
-        mod.connection_test ? h('button', {
-          class: 'icon-btn', title: `Test ${item.name}`, 'aria-label': `Test ${item.name}`,
-          disabled: item.status !== 'valid', onclick: () => quickTest(item.id),
-        }, '⚡') : null)))
-        : h('div', { class: 'muted small' }, 'No settings needed.'),
-      mod.fields.length ? h('div', {}, h('button', { class: 'btn small', onclick: () => createInstance(mod) }, '+ New connection')) : null,
-      h('details', { class: 'small' }, h('summary', { class: 'muted' }, `${mod.actions.length} action${mod.actions.length === 1 ? '' : 's'}`),
-        h('ul', { class: 'action-list' }, mod.actions.map((action) => h('li', {}, h('strong', {}, action.label), ' — ', action.description)))));
+    const main = instances.find((item) => item.default) || instances[0];
+    const extra = instances.filter((item) => item !== main);
+    const selected = instances.some((item) => item.id === state.instanceId);
+    const badge = moduleState(mod, main);
+    const clickable = Boolean(mod.fields.length && main);
+    return h('div', {
+      class: `panel module-card ${categoryClass(mod)}${selected ? ' selected' : ''}${clickable ? ' clickable' : ''}`,
+      role: clickable ? 'button' : undefined, tabindex: clickable ? '0' : undefined,
+      'aria-label': clickable ? `${mod.label} settings` : undefined,
+      onclick: clickable ? () => selectInstance(main.id) : undefined,
+      onkeydown: clickable ? (e) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectInstance(main.id); }
+      } : undefined,
+    },
+    h('div', { class: 'module-head' }, moduleBadge(mod),
+      h('div', { class: 'grow' }, h('div', { class: 'category' }, mod.category), h('h3', {}, mod.label)),
+      h('span', { class: `pill ${badge.kind}`, title: badge.title }, badge.label)),
+    h('div', { class: 'muted small module-desc' }, mod.description),
+    // extra named connections (instances: in config.yaml)
+    extra.length ? h('div', { class: 'list' }, extra.map((item) => {
+      const itemState = moduleState(mod, item);
+      return h('button', {
+        class: `instance-row${item.id === state.instanceId ? ' active' : ''}`,
+        onclick: (e) => { e.stopPropagation(); selectInstance(item.id); },
+      }, h('span', { class: 'name' }, item.name), h('span', { class: `pill ${itemState.kind}`, title: itemState.title }, itemState.label));
+    })) : null);
   }));
-  const configured = state.instances.filter((item) => item.status === 'valid').length;
-  const head = h('div', { class: 'panel modules-head' },
-    h('div', { class: 'grow' }, h('h2', {}, 'Modules'),
-      h('p', { class: 'muted small' }, `${configured} ready connection${configured === 1 ? '' : 's'}. `,
-        'A module default is used by every step that picks no other connection; add more connections to talk to several servers of the same kind.')),
-    h('button', { class: 'btn primary', onclick: (e) => testAllInstances(e.currentTarget) }, 'Test all connections'));
-  return h('div', {}, head, h('div', { class: 'layout-modules' }, h('section', {}, grid),
-    h('aside', { class: 'side-panel' }, renderInstanceEditor())));
+}
+
+function renderModulesView() {
+  return h('div', {},
+    h('h1', { class: 'page-title' }, 'Modules'),
+    h('div', { class: 'layout-modules' }, renderModuleGrid(),
+      h('aside', { class: 'side-panel' }, renderInstanceEditor())));
+}
+
+let moduleCheckRunning = false;
+/** Refresh the module states and test every complete connection, without touching the open editor. */
+async function checkModules() {
+  if (moduleCheckRunning) return;
+  moduleCheckRunning = true;
+  try {
+    await refreshInstances();
+    const { results } = await api('POST', 'instances/test-all');
+    Object.entries(results).forEach(([id, result]) => { const item = instanceById(id); if (item) item.test = result; });
+  } catch (err) { /* the next check tries again */ }
+  moduleCheckRunning = false;
+  const grid = document.getElementById('module-grid');
+  if (grid && state.view === 'modules') grid.replaceWith(renderModuleGrid());
 }
 
 function loadInstanceDraft(id) {
@@ -1423,40 +1743,6 @@ function openInstanceDialog(id) {
   }, { once: true });
 }
 
-async function createInstance(mod, onCreated) {
-  const name = window.prompt(`Name of the new ${mod.label} connection`, `Home ${mod.label}`);
-  if (!name) return;
-  try {
-    const created = await api('POST', 'instances', { module: mod.id, name });
-    await refreshInstances();
-    toast('Connection created. Fill in its settings.', 'ok');
-    if (onCreated) onCreated(created.id);
-    if (state.view === 'flows') openInstanceDialog(created.id);
-    else selectInstance(created.id);
-  } catch (err) { toast(err.message, 'err'); }
-}
-
-async function testAllInstances(button) {
-  if (button) { button.disabled = true; button.textContent = 'Testing…'; }
-  try {
-    const { results } = await api('POST', 'instances/test-all');
-    Object.entries(results).forEach(([id, result]) => { const item = instanceById(id); if (item) item.test = result; });
-    const failed = Object.values(results).filter((result) => !result.ok).length;
-    const total = Object.keys(results).length;
-    toast(total ? `${total - failed} of ${total} complete connections work.` : 'No complete connections to test yet.', failed ? 'err' : 'ok');
-  } catch (err) { toast(err.message, 'err'); }
-  render();
-}
-
-async function quickTest(id) {
-  try {
-    const result = await api('POST', `instances/${encodeURIComponent(id)}/test`);
-    instanceById(id).test = result;
-    toast(result.message, result.ok ? 'ok' : 'err');
-  } catch (err) { toast(err.message, 'err'); }
-  render();
-}
-
 function instancePayload() {
   const draft = state.instanceDraft;
   const config = clone(draft.config) || {};
@@ -1467,7 +1753,7 @@ function instancePayload() {
 function renderInstanceEditor(inDialog = false) {
   const item = instanceById(state.instanceId);
   if (!item || !state.instanceDraft) {
-    return h('div', { class: 'panel muted' }, 'Select a module instance to edit its settings. A module default applies to every step without an instance; named instances let you connect to several servers of the same kind.');
+    return h('div', { class: 'panel muted' }, 'Select a connection to edit its settings.');
   }
   const mod = moduleDef(item.module);
   const draft = state.instanceDraft;
@@ -1477,12 +1763,39 @@ function renderInstanceEditor(inDialog = false) {
     && prefix.every((part, i) => issue.path[i] === part));
   const panel = h('div', { class: inDialog ? 'instance-editor' : 'panel instance-editor' });
   const set = (key, value) => { setPath(draft.config, key, value); };
-  const basic = mod.fields.filter((spec) => !spec.advanced);
-  const advanced = mod.fields.filter((spec) => spec.advanced);
+  // connection first, then other short fields and switches; word lists take a full row and come last
+  const isConnection = (spec) => ['url', 'secret'].includes(spec.type) || ['username', 'password'].includes(spec.key);
+  const rank = (spec) => {
+    if (['list', 'object'].includes(spec.type)) return 3;  // full-row lists always last
+    if (spec.type === 'url') return 0;            // address first,
+    if (spec.key === 'username') return 1;        // then the user name
+    if (spec.key === 'password') return 1.5;      // with its password right after it
+    return 2;                                     // then keys and other short fields
+  };
+  const ordered = (specs) => specs.map((spec, i) => [spec, i])
+    .sort(([a, i], [b, j]) => rank(a) - rank(b) || i - j).map(([spec]) => spec);
+  const basic = visible(mod.fields).filter((spec) => !spec.advanced);
+  const advanced = ordered(visible(mod.fields).filter((spec) => spec.advanced));
+  // short fields and switches sit side by side in two equal columns
+  const main = [...ordered(basic.filter(isConnection)), ...ordered(basic.filter((spec) => !isConnection(spec)))]
+    .sort((a, b) => (rank(a) >= 3) - (rank(b) >= 3));
+  // keep the user name and password in one row: if the user name would start in the
+  // right column, the next short field moves up beside the URL (or the URL takes the row)
+  const wide = new Set();
+  const userAt = main.findIndex((spec) => spec.key === 'username');
+  if (userAt > 0 && userAt % 2 === 1 && main[userAt + 1]?.key === 'password') {
+    const next = main.findIndex((spec, i) => i > userAt + 1 && rank(spec) < 3);
+    if (next >= 0) main.splice(userAt, 0, ...main.splice(next, 1));
+    else wide.add(main[userAt - 1].key);
+  }
+  const gridOf = (specs) => h('div', { class: 'form-grid settings-grid' }, specs.map((spec) => renderSpec(spec)));
   const renderSpec = (spec) => {
     const secretSet = spec.type === 'secret' && item.secrets.includes(spec.key) && !draft.clear.includes(spec.key);
     return fieldInput(spec, getPath(draft.config, spec.key), (value) => set(spec.key, value), {
       issues: at(spec.key),
+      wide: wide.has(spec.key),
+      // the main connection has no other values to inherit, so yes/no is a switch
+      switch: item.default,
       secretSet,
       extra: spec.type === 'secret' && item.secrets.includes(spec.key) ? h('label', { class: 'check small' },
         h('input', { type: 'checkbox', checked: draft.clear.includes(spec.key), onchange: (e) => {
@@ -1491,46 +1804,56 @@ function renderInstanceEditor(inDialog = false) {
     });
   };
   panel.append(...[
-    h('div', { class: 'panel-head' }, moduleBadge(mod), h('h2', {}, item.name), h('span', { class: 'spacer' }), statusPill(item.status)),
+    h('div', { class: 'panel-head' }, moduleBadge(mod), h('h2', {}, item.default ? mod.label : item.name), h('span', { class: 'spacer' }), statusPill(item.status)),
     h('p', { class: 'muted small' }, item.default
-      ? `Default ${mod.label} settings (the "${item.id}" section of config.yaml). Named instances inherit them.`
-      : `Named ${mod.label} instance "${item.id}". Empty fields inherit the module default.`),
+      ? `Used by every ${mod.label} step.`
+      : `Extra ${mod.label} connection. Empty fields use the main ${mod.label} settings.`),
     item.default ? null : h('div', { class: 'field' }, h('label', { for: 'inst-name' }, 'Name'),
       h('input', { id: 'inst-name', type: 'text', value: draft.name, oninput: (e) => { draft.name = e.target.value; } })),
-    h('div', { class: 'form-grid' }, basic.map(renderSpec)),
-    advanced.length ? h('details', { class: 'section' }, h('summary', {}, 'Advanced'),
-      h('div', { class: 'form-grid' }, advanced.map(renderSpec))) : null,
+    gridOf(main),
+    advanced.length ? h('details', { class: 'section', open: advanced.some((spec) => at(spec.key).length > 0) },
+      h('summary', {}, 'More options'),
+      gridOf(advanced)) : null,
     h('div', { class: 'section-gap' }),
-    issueList(issues.filter((issue) => !mod.fields.some((spec) => at(spec.key).includes(issue)))) || '',
+    issueList(issues.filter((issue) => !visible(mod.fields).some((spec) => at(spec.key).includes(issue)))) || '',
     item.test ? h('div', { class: `issue ${item.test.ok ? '' : 'error'}` },
       h('span', { class: `pill ${item.test.ok ? 'ok' : 'err'}` }, item.test.ok ? 'connected' : 'failed'), ' ', item.test.message) : null,
     h('div', { class: 'btn-row section-gap' },
       h('button', { class: 'btn primary', onclick: saveInstance }, 'Save'),
-      h('button', { class: 'btn', onclick: validateInstance }, 'Validate'),
-      mod.connection_test ? h('button', { class: 'btn', onclick: testInstance }, 'Test connection') : null,
+      h('button', { class: 'btn', 'data-test-button': '', onclick: () => testInstance(mod) }, 'Test'),
       item.default ? null : h('button', { class: 'btn danger', onclick: deleteInstance }, 'Delete'),
       inDialog ? h('button', { class: 'btn ghost', onclick: () => document.getElementById('dialog').close() }, 'Close') : null),
   ].filter((child) => child !== null && child !== undefined && child !== ''));
   return panel;
 }
 
-async function validateInstance() {
+// Check the settings first, then try the connection when the module has a test.
+async function testInstance(mod) {
+  const busy = () => document.querySelectorAll('[data-test-button]').forEach((button) => {
+    button.disabled = true;
+    button.textContent = 'Testing…';
+  });
+  busy();
   try {
-    const result = await api('POST', `instances/${encodeURIComponent(state.instanceId)}/validate`, instancePayload());
-    state.instanceIssues = result.issues;
-    toast(`Settings are ${result.status}.`, result.status === 'valid' ? 'ok' : 'err');
-    refreshInstanceView();
-  } catch (err) { toast(err.message, 'err'); }
-}
-
-async function testInstance() {
-  try {
-    const result = await api('POST', `instances/${encodeURIComponent(state.instanceId)}/test`, instancePayload());
+    const id = encodeURIComponent(state.instanceId);
+    const payload = instancePayload();
+    const check = await api('POST', `instances/${id}/validate`, payload);
+    state.instanceIssues = check.issues;
     const item = instanceById(state.instanceId);
-    item.test = result;
-    toast(result.message, result.ok ? 'ok' : 'err');
-    refreshInstanceView();
+    if (item) item.test = null;
+    if (check.status !== 'valid') {
+      toast(`Settings are ${check.status}. Fix them before testing.`, 'err');
+    } else if (!mod.connection_test) {
+      toast('Settings are valid.', 'ok');
+    } else {
+      refreshInstanceView();  // show the cleared issues while the connection test runs
+      busy();
+      const result = await api('POST', `instances/${id}/test`, payload);
+      if (item) item.test = result;
+      toast(result.message, result.ok ? 'ok' : 'err');
+    }
   } catch (err) { toast(err.message, 'err'); }
+  refreshInstanceView();
 }
 
 async function saveInstance() {
@@ -1560,50 +1883,6 @@ async function deleteInstance() {
   } catch (err) { toast(err.message, 'err'); }
 }
 
-/* =============================================================== SETTINGS */
-
-async function loadSettings() {
-  try {
-    [state.settings, state.report] = await Promise.all([api('GET', 'settings'), api('GET', 'validate')]);
-    if (state.view === 'settings') render();
-  } catch (err) { toast(err.message, 'err'); }
-}
-
-function renderSettingsView() {
-  const settings = state.settings;
-  const report = state.report;
-  if (!settings) return h('div', { class: 'panel muted' }, 'Loading…');
-  const mode = h('select', { id: 'exec-mode' }, settings.modes.map((item) => h('option', { value: item }, item)));
-  mode.value = settings.execution;
-  const flowNames = Object.fromEntries(state.flows.map((flow) => [flow.id, flow.name]));
-  return h('div', {},
-    h('div', { class: 'panel' },
-      h('div', { class: 'panel-head' }, h('h2', {}, 'Runtime')),
-      h('div', { class: 'form-grid' },
-        h('div', { class: 'field' }, h('label', { for: 'exec-mode' }, 'Execution mode'), mode,
-          h('div', { class: 'hint' }, 'parallel: one worker per flow · sequential: due flows run one at a time by priority.'))),
-      settings.restart_required ? h('p', { class: 'field-issue warning' }, `Restart CineFlow to switch from ${settings.execution_effective} to ${settings.execution} mode.`) : null,
-      h('div', { class: 'btn-row section-gap' },
-        h('button', { class: 'btn primary', onclick: async () => {
-          try { state.settings = await api('PUT', 'settings', { execution: mode.value }); toast('Saved.', 'ok'); render(); } catch (err) { toast(err.message, 'err'); }
-        } }, 'Save'))),
-    h('div', { class: 'panel' },
-      h('div', { class: 'panel-head' }, h('h2', {}, 'Validation'), h('span', { class: 'spacer' }),
-        h('button', { class: 'btn small', onclick: loadSettings }, 'Re-run')),
-      report ? h('div', {},
-        h('h3', {}, 'config.yaml ', report.config.some((i) => i.level === 'error') ? h('span', { class: 'pill err' }, 'errors') : h('span', { class: 'pill ok' }, 'ok')),
-        issueList(report.config) || '',
-        Object.entries(report.flows).map(([id, issues]) => h('div', { class: 'section-gap' },
-          h('h3', {}, `${flowNames[id] || id} `, issues.some((i) => i.level === 'error') ? h('span', { class: 'pill err' }, 'errors') : h('span', { class: 'pill ok' }, 'ok')),
-          issueList(issues) || ''))) : null),
-    h('div', { class: 'panel' },
-      h('div', { class: 'panel-head' }, h('h2', {}, 'Export')),
-      h('p', { class: 'muted' }, 'Download config.yaml without secrets. Every save keeps the previous file version in the .backups folder of the configuration directory.'),
-      h('button', { class: 'btn', onclick: async () => {
-        try { const data = await api('GET', 'config/export'); download(data.filename, data.yaml); } catch (err) { toast(err.message, 'err'); }
-      } }, 'Export config.yaml')));
-}
-
 /* ------------------------------------------------------------------ start */
 
 async function start() {
@@ -1629,11 +1908,17 @@ async function start() {
   }
   let view = 'flows';
   try { view = localStorage.getItem('cineflow.view') || 'flows'; } catch (e) { /* storage unavailable */ }
-  setView(['flows', 'modules', 'settings'].includes(view) ? view : 'flows');
-  if (state.flows.length) selectFlow(state.flows[0].id);
+  setView(['flows', 'modules'].includes(view) ? view : 'flows');
+  let lastFlow = null;
+  try { lastFlow = localStorage.getItem('cineflow.flow'); } catch (e) { /* storage unavailable */ }
+  const first = state.flows.find((flow) => flow.id === lastFlow) || state.flows[0];
+  if (first) selectFlow(first.id);
   setInterval(() => {
-    if (state.view === 'flows' && state.flowId && !state.dirty && state.stepIndex === null) refreshRuntime();
-  }, 10000);
+    if (state.view === 'flows' && state.flowId) refreshRuntime();
+  }, 15000);
+  setInterval(() => {
+    if (state.view === 'modules' && !document.hidden) checkModules();
+  }, MODULE_CHECK_INTERVAL);
 }
 
 start();

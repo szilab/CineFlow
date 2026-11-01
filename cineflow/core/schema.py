@@ -39,12 +39,18 @@ class Field:  # pylint: disable=too-many-instance-attributes
     # module fields a workflow step may override in its ``config``
     step: bool = False
     advanced: bool = False
+    # accepted in YAML but never shown in the GUI
+    hidden: bool = False
+    # item type of a 'list': 'text' (words, edited as labels) or 'object' (mappings)
+    item_type: str = 'text'
 
     def __post_init__(self) -> None:
         if self.type not in FIELD_TYPES:
             raise ValueError(f"Unknown field type '{self.type}' for '{self.key}'.")
         if self.type == 'select' and not self.options:
             raise ValueError(f"Select field '{self.key}' needs options.")
+        if self.item_type not in ('text', 'object'):
+            raise ValueError(f"Unknown list item type '{self.item_type}' for '{self.key}'.")
 
     def to_dict(self) -> dict:
         """Return the JSON-serializable field description."""
@@ -60,6 +66,8 @@ class Field:  # pylint: disable=too-many-instance-attributes
             'maximum': self.maximum,
             'step': self.step,
             'advanced': self.advanced,
+            'hidden': self.hidden,
+            'item_type': self.item_type,
         }
 
 
@@ -274,6 +282,18 @@ def mask_secrets(definition: ModuleDefinition | None, values: dict) -> tuple[dic
     return masked, present
 
 
+MEDIA_KINDS = ('movie', 'tv')
+DEFAULT_MEDIA_KIND = 'movie'
+
+
+def flow_media_kind(flow: Any) -> str | None:
+    """Return the media kind of a flow (default movie), or None when it is invalid."""
+    if not isinstance(flow, dict):
+        return None
+    kind = flow.get('kind') or DEFAULT_MEDIA_KIND
+    return kind if kind in MEDIA_KINDS else None
+
+
 def is_secret_key(key: str) -> bool:
     """Return whether an undeclared setting name looks like a credential."""
     lowered = str(key).lower()
@@ -281,19 +301,38 @@ def is_secret_key(key: str) -> bool:
 
 
 # Fields shared by several modules
-KIND = Field(
-    'kind', 'select', 'Media kind', "Movies or TV series.", default='movie',
-    options=('movie', 'tv'), step=True,
-)
-LIMIT = Field('limit', 'integer', 'Limit', "Maximum number of collected items.", minimum=1, step=True)
-QUICK_MATCH = Field(
-    'quick_match', 'boolean', 'Quick match',
-    "Accept a single search result without a strict year comparison.", default=False, step=True,
-)
+# safety cap of collecting actions; high enough that users never need to change it
+LIMIT = Field('limit', 'integer', 'Limit', "Maximum number of collected items.", default=200, minimum=1,
+              step=True, hidden=True)
 SEARCH_PREFERENCE = Field(
-    'search_preference', 'list', 'Search preference',
-    "Release name words in order of preference, e.g. HUN, HDR, 1080p.", step=True,
+    'search_preference', 'list', 'Release preference',
+    "Release name words in order of preference, e.g. HUN, HDR, 1080p. Picks the torrent "
+    "and decides whether a library item is replaced by a better release.", default=[],
 )
+LIBRARY_DIRECTORY = Field(
+    'library_directory', 'path', 'Library folder',
+    "Folder inside the export directory where library items are created. "
+    "Default: the media kind (movie or tv).",
+)
+
+
+@dataclass(frozen=True)
+class FlowSetting:
+    """A flow setting the flow hands to the modules that use it."""
+
+    field: Field
+    module_key: str          # the module setting it fills
+    modules: tuple           # module ids that receive it
+    kind_default: bool = False  # when the flow sets no value, the media kind is the value
+
+
+# flow key -> setting
+FLOW_SETTINGS = {
+    'library_directory': FlowSetting(LIBRARY_DIRECTORY, 'directory', ('library',), kind_default=True),
+    'search_preference': FlowSetting(SEARCH_PREFERENCE, 'search_preference', ('jackett', 'library')),
+}
+
+
 MUST_MATCH = Field(
     'must_match', 'boolean', 'Must match',
     "Drop items that have no match instead of passing them on unchanged.", default=False,
@@ -302,8 +341,8 @@ MUST_MATCH = Field(
 # query keys shared by the media server modules
 MEDIA_SERVER_QUERY = (
     Field('parentLibrary', 'string', 'Library', "Library name to query."),
-    Field('searchTerm', 'string', 'Search term'),
-    Field('isInverse', 'boolean', 'Inverse', "Return the library items outside the query."),
+    Field('searchTerm', 'string', 'Search term', advanced=True),
+    Field('isInverse', 'boolean', 'Inverse', "Return the library items outside the query.", advanced=True),
 )
 
 

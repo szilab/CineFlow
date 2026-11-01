@@ -7,7 +7,7 @@ from cineflow.utils.misc import evaluate, fix_imdbid, search_preference_score
 from cineflow.utils.image import ImageHandler
 from cineflow.core.bases.module import LibraryBase
 from cineflow.core.schema import (
-    ModuleDefinition, ActionDefinition, Field, KIND, SEARCH_PREFERENCE, INPUT_DATA, INPUT_NONE,
+    ModuleDefinition, ActionDefinition, Field, INPUT_DATA, INPUT_NONE,
 )
 
 
@@ -16,10 +16,13 @@ class Library(LibraryBase):
     Module to handle media library.
 
     Configuration:
-        - directory: library directory inside EXPORT_DIRECTORY (required)
         - limit: number of maximum items in library (default: 500, minimum: 10)
         - age: maximum age of items in library in days (default: 120, minimum: 30)
-        - search_preference: release name preferences used to rank releases (optional)
+
+    Given by the flow:
+        - directory: library folder inside EXPORT_DIRECTORY (flow ``library_directory``,
+          default: the media kind)
+        - search_preference: release name preferences used to rank releases
         - kind: 'movie' (default) or 'tv'; series get a 'Season NN' folder
 
     Functions:
@@ -34,15 +37,12 @@ class Library(LibraryBase):
         id='library', label='Library', category='internal',
         description="Exported placeholder library that a media server can scan.",
         fields=(
-            Field('directory', 'path', 'Directory', "Library folder inside EXPORT_DIRECTORY.",
-                  required=True, step=True),
             Field('limit', 'integer', 'Item limit', "Maximum number of items kept.",
                   default=500, minimum=10, step=True),
             Field('age', 'integer', 'Maximum age (days)', "Older items are removed.",
                   default=120, minimum=30, step=True),
-            KIND, SEARCH_PREFERENCE,
             Field('rules', 'list', 'Poster rules',
-                  "Poster modification rules (list of mappings).", advanced=True),
+                  "Poster modification rules (list of mappings).", advanced=True, item_type='object'),
         ),
         actions=(
             ActionDefinition('get', 'Get library items', "List the exported items.",

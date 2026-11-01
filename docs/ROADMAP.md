@@ -120,7 +120,7 @@ Radarr must remain optional. Existing direct Jackett → Transmission workflows 
 
 Optional workflow integration for TV/series acquisition and management.
 
-Basic series support already exists without Sonarr: every module accepts `kind: tv` (TMDb shows, Jackett season packs, Jellyfin/Plex series, series library export).
+Basic series support already exists without Sonarr: a flow with `kind: tv` drives every module (TMDb shows, Jackett season packs, Jellyfin/Plex series, series library export).
 
 Possible actions mirror the Radarr integration where appropriate.
 

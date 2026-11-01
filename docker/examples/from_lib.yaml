@@ -1,6 +1,8 @@
 name: Library clean up and P2P task
 delay: 15  # minutes
 priority: 1
+kind: movie
+search_preference: ["HUN", "HDR", "1080p", "2160p"]
 steps:
 
   - name: Collect Jellyfin favorites

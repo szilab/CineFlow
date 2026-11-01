@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from abc import ABC, abstractmethod
 from cineflow.core.logger import log
 from cineflow.core.config import Config, cfg
+from cineflow.core.schema import LIMIT
 from cineflow.utils.misc import MEDIA_KINDS, sanitize_name
 from cineflow.utils.request import RequestHandler
 from cineflow.utils.directory import CleanupScheduler, DirectoryHandler
@@ -42,7 +43,8 @@ class ModuleBase():
                 continue
             raise ValueError(f"Missing required module config '{self.name}.{key}'")
         self._kind = 'movie'
-        self.kind = self.cfg('kind', default='movie')
+        # the media kind comes from the flow that builds the module, never from config.yaml
+        self.kind = (config or {}).get('kind', 'movie')
 
     def cfg(self, key: str, default=None) -> dict:
         """Return the module configuration."""
@@ -134,7 +136,7 @@ class ConsumerBase(ModuleBase, ABC):
         if not self._url:
             raise ValueError(f"Missing required module config '{self.name}.url'")
         self._handler = RequestHandler(url=self._url)
-        self._limit = self.cfg('limit', 100)
+        self._limit = self.cfg('limit', LIMIT.default)
         self._force_upd_fields = []
 
     @abstractmethod
@@ -167,7 +169,6 @@ class ConsumerBase(ModuleBase, ABC):
 
     def match(self, results: List[Dict], media: dict) -> dict:
         """Match item from the results"""
-        quck_match = self.cfg('quick_match', default=False) and results and len(results) == 1
         for item in results or []:
             if self._match_w_id(item=item, media=media):
                 log(f"Item '{media.get('title')}' match found by TMDB ID")
@@ -175,10 +176,10 @@ class ConsumerBase(ModuleBase, ABC):
             if self._match_w_id(item=item, media=media, idkey='imdbid'):
                 log(f"Item '{media.get('title')}' match found by IMDB ID")
                 return item
-            if self._match_w_title(item=item, media=media, quick_match=quck_match):
+            if self._match_w_title(item=item, media=media):
                 log(f"Item '{media.get('title')}' match found by title ID")
                 return item
-            if self._match_w_title(item=item, media=media, titlekey='alttitle', quick_match=quck_match):
+            if self._match_w_title(item=item, media=media, titlekey='alttitle'):
                 log(f"Item '{media.get('title')}' match found by alternate title ID")
                 return item
         return None
@@ -189,10 +190,8 @@ class ConsumerBase(ModuleBase, ABC):
             return True
         return False
 
-    def _match_w_title(
-        self, item: dict, media: dict, titlekey: str = 'title', quick_match: bool = False
-    ) -> bool:
-        """Match item from the results"""
+    def _match_w_title(self, item: dict, media: dict, titlekey: str = 'title') -> bool:
+        """Match by title; the year must match too, except for series without a known year."""
         title = sanitize_name(name=media.get(titlekey)).lower()
         if not title:
             return False
@@ -202,9 +201,8 @@ class ConsumerBase(ModuleBase, ABC):
         my = str(media.get('year'))
         # series releases often have no year; the title alone must match then
         year_unknown = self._kind == 'tv' and not (item.get('year') and media.get('year'))
-        if not quick_match and not year_unknown:
-            if iy != my:
-                return False
+        if not year_unknown and iy != my:
+            return False
         if it == title:
             return True
         if ia and ia == title:

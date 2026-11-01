@@ -1,7 +1,5 @@
 """Focused regression tests for the SQLite cache database."""
 
-import base64
-import json
 import sqlite3
 from datetime import datetime as dt
 from pathlib import Path
@@ -63,33 +61,6 @@ def test_existing_nonempty_database_gets_missing_schema(
             "SELECT name FROM sqlite_master WHERE type = 'table';"
         ).fetchall()
         assert {"existing", "request"}.issubset({name for name, in tables})
-    finally:
-        database.stop()
-        database.close()
-        SingletonMeta._instances.pop(Database, None)
-
-
-def test_legacy_schema_gains_expiry_and_drops_unused_media_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    db_file = tmp_path / "cachedb.sqlite3"
-    connection = sqlite3.connect(db_file)
-    connection.execute(
-        "CREATE TABLE request (hash TEXT NOT NULL PRIMARY KEY, data BLOB NOT NULL, added REAL NOT NULL);"
-    )
-    connection.execute("CREATE TABLE media (title TEXT);")
-    encoded = base64.b64encode(json.dumps({"version": "old"}).encode("utf-8"))
-    connection.execute("INSERT INTO request VALUES (?, ?, ?);", ("kept", encoded, dt.now().timestamp()))
-    connection.commit()
-    connection.close()
-    monkeypatch.setenv("DB_DIRECTORY", str(tmp_path))
-
-    SingletonMeta._instances.pop(Database, None)
-    database = Database()
-    try:
-        tables = database._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table';").fetchall()
-        assert {name for name, in tables} == {"request"}
-        assert database.get_request("kept") == {"version": "old"}
     finally:
         database.stop()
         database.close()

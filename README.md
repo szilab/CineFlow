@@ -15,7 +15,7 @@ The runtime is headless and YAML-driven. An optional built-in web GUI configures
 ## Features
 
 ### Core Capabilities
-- Movies and TV series (`kind: tv`)
+- Movies and TV series (`kind: tv` on the flow)
 - Optional web GUI: module manager, card-based drag-and-drop flow editor, validation, manual runs
 - `cineflow validate` preflight check of configuration and flows
 - Automated media discovery via TMDb

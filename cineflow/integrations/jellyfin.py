@@ -4,7 +4,7 @@ from typing import List, Any
 from cineflow.core.logger import log
 from cineflow.core.bases.module import MediaServerBase
 from cineflow.core.schema import (
-    ModuleDefinition, Field, KIND, LIMIT, QUICK_MATCH, MEDIA_SERVER_QUERY, consumer_actions,
+    ModuleDefinition, Field, MEDIA_SERVER_QUERY, consumer_actions,
 )
 from cineflow.utils.misc import fix_imdbid
 
@@ -16,8 +16,7 @@ class Jellyfin(MediaServerBase):
     Configuration:
         - url: Jellyfin base URL (e.g., http://localhost:8096)
         - token: Jellyfin API key (required)
-        - limit: Number of results to return (default: 20)
-        - kind: 'movie' (default) or 'tv' to query series
+        - kind: 'movie' (default) or 'tv' to query series, given by the flow
 
     Functions:
         - search: Search media for a given title.
@@ -33,8 +32,8 @@ class Jellyfin(MediaServerBase):
         fields=(
             Field('url', 'url', 'URL', "Jellyfin base URL, e.g. http://jellyfin:8096.", required=True),
             Field('token', 'secret', 'API key', "Jellyfin API key.", required=True),
-            KIND, LIMIT, QUICK_MATCH,
-            Field('ignore.users', 'list', 'Ignored users', "User names left out of queries."),
+            Field('ignore.users', 'list', 'Ignored users', "User names left out of queries.",
+                  advanced=True),
         ),
         actions=consumer_actions('Jellyfin', query=(
             *MEDIA_SERVER_QUERY,

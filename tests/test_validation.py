@@ -223,7 +223,7 @@ def test_step_settings_and_required_values() -> None:
         ('steps.0.config.url', 'required'), ('steps.0.config.token', 'required'),
         ('steps.1.config.must_match', 'type'),
         ('steps.1.config.token', 'required'),
-        ('steps.1.config.kind', 'choice'),
+        ('steps.1.config.kind', 'unknown'),
         ('steps.1.config.mystery', 'unknown'),
     ]
 
@@ -276,7 +276,7 @@ def test_input_references_and_shapes() -> None:
 
 def test_valid_structured_flow_has_no_issues() -> None:
     data = flow(
-        {'name': 'trending', 'module': 'tmdb', 'action': 'get', 'config': {'kind': 'tv'}},
+        {'name': 'trending', 'module': 'tmdb', 'action': 'get'},
         {'name': 'releases', 'module': 'jackett', 'action': 'enrich', 'input': 'previous',
          'config': {'must_match': True, 'season_pack_only': False}},
         {'name': 'missing', 'module': 'jellyfin', 'instance': 'home', 'action': 'unique',
@@ -285,8 +285,68 @@ def test_valid_structured_flow_has_no_issues() -> None:
         {'name': 'save', 'module': 'tools', 'action': 'data_export',
          'input': {'data': 'previous', 'filename': 'x.json'}},
         {'name': 'download', 'module': 'transmission', 'action': 'put', 'input': '{{merge}}'},
-        enabled=True, delay=30, priority=1, description='TV', version=3,
+        enabled=True, delay=30, priority=1, description='TV', version=3, kind='tv',
     )
 
     assert validation.validate_flow(data, CONFIG) == []
     assert validation.flow_is_runnable(data, CONFIG)
+
+
+def test_media_kind_is_a_flow_setting() -> None:
+    tmdb_step = {'name': 'a', 'module': 'tmdb', 'action': 'get'}
+
+    assert validation.validate_flow(flow(tmdb_step, kind='tv'), CONFIG) == []
+    assert codes(validation.validate_flow(flow(tmdb_step, kind='anime'), CONFIG)) == [('kind', 'choice')]
+    # a kind on a step is not a step setting
+    assert codes(validation.validate_flow(flow({**tmdb_step, 'config': {'kind': 'tv'}}), CONFIG)) == [
+        ('steps.0.config.kind', 'unknown')]
+
+
+@pytest.mark.parametrize(('data', 'expected'), [
+    ({'steps': []}, 'movie'),
+    ({'kind': None, 'steps': []}, 'movie'),
+    ({'kind': 'tv', 'steps': []}, 'tv'),
+    ({'steps': [{'config': {'kind': 'tv'}}]}, 'movie'),
+    ({'kind': 'anime', 'steps': []}, None),
+    ('x', None),
+])
+def test_flow_media_kind(data, expected) -> None:
+    from cineflow.core.schema import flow_media_kind
+
+    assert flow_media_kind(data) == expected
+
+
+def test_limit_is_hidden_and_only_declared_where_it_is_used() -> None:
+    definitions = catalog.definitions()
+    with_limit = {mid for mid, item in definitions.items() if any(f.key == 'limit' for f in item.fields)}
+
+    assert with_limit == {'tmdb', 'jackett', 'library'}
+    for module_id in ('tmdb', 'jackett'):
+        spec = next(f for f in definitions[module_id].fields if f.key == 'limit')
+        assert spec.to_dict()['hidden'] is True
+        assert spec.default == 200
+    # a value written in YAML is still accepted without warnings
+    assert validation.validate_flow(flow(
+        {'name': 'a', 'module': 'tmdb', 'action': 'get', 'config': {'limit': 50}},
+    ), CONFIG) == []
+
+
+def test_list_fields_declare_their_item_type() -> None:
+    rules = next(f for f in catalog.definitions()['library'].fields if f.key == 'rules')
+    assert rules.to_dict()['item_type'] == 'object'
+    assert Field('words', 'list').to_dict()['item_type'] == 'text'
+    with pytest.raises(ValueError):
+        Field('words', 'list', item_type='number')
+
+
+def test_library_folder_and_release_preference_are_flow_settings() -> None:
+    definitions = catalog.definitions()
+    assert all(f.key != 'directory' for f in definitions['library'].fields)
+    assert all(f.key != 'search_preference' for name in ('library', 'jackett') for f in definitions[name].fields)
+    good = flow({'name': 'a', 'module': 'library', 'action': 'get'})
+    good.update({'library_directory': 'films/new', 'search_preference': ['HUN']})
+    assert validation.validate_flow(good, CONFIG) == []
+    bad = flow({'name': 'a', 'module': 'library', 'action': 'get'})
+    bad.update({'library_directory': '../x', 'search_preference': 'HUN'})
+    assert codes(validation.validate_flow(bad, CONFIG)) == [('library_directory', 'format'),
+                                                            ('search_preference', 'type')]

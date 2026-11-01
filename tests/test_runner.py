@@ -344,13 +344,11 @@ def test_sequential_manager_respects_due_times_priority_and_reload(
     assert replacement.started == 0
 
 
-def test_refresh_delay_prefers_correctly_spelled_environment_variable(
+def test_refresh_delay_reads_its_environment_variable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The corrected refresh variable takes precedence over the legacy typo."""
     monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
     monkeypatch.setenv("FM_REFRESH_SEQ", "15")
-    monkeypatch.setenv("FM_RERESH_SEQ", "60")
     monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
     monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: "parallel")
 
@@ -493,3 +491,90 @@ def test_flow_stop_request_aborts_before_next_step(flow_factory) -> None:
     flow.run()
 
     assert ActionModule.calls == [("get", None)]
+
+
+def test_flow_passes_its_media_kind_to_every_module(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(runner, "load_module", lambda name: ActionModule)
+    flow = runner.Flow(str(tmp_path / "kind.yaml"), definition={"kind": "tv", "steps": [
+        {"name": "a", "module": "tmdb", "action": "get"},
+        {"name": "b", "module": "tmdb", "action": "get", "config": {"limit": 5}},
+        {"name": "c", "module": "tools", "action": "get"},
+    ]})
+
+    configs = [flow._load_module(step=step).config for step in flow.steps]
+
+    assert configs == [{"kind": "tv"}, {"limit": 5, "kind": "tv"}, {"kind": "tv"}]
+
+
+def test_flow_media_kind_defaults_to_movie_and_wins_over_a_step_kind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(runner, "load_module", lambda name: ActionModule)
+    flow = runner.Flow(str(tmp_path / "a.yaml"), definition={"steps": [
+        {"name": "a", "module": "tmdb", "action": "get", "config": {"kind": "tv"}}]})
+
+    assert flow.kind == "movie" and flow.valid
+    assert flow._load_module(step=flow.steps[0]).config["kind"] == "movie"
+
+
+def test_flow_with_invalid_media_kind_does_not_run(tmp_path: Path) -> None:
+    flow = runner.Flow(str(tmp_path / "kind.yaml"), definition={
+        "kind": "anime", "steps": [{"name": "a", "module": "tmdb", "action": "get"}]})
+
+    assert flow.valid is False
+
+
+def test_flow_settings_reach_only_the_modules_that_use_them(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(runner, "load_module", lambda name: ActionModule)
+    monkeypatch.setattr(runner, "cfg", lambda key: {})
+    flow = runner.Flow(str(tmp_path / "lib.yaml"), definition={
+        "library_directory": "films", "search_preference": ["HUN", "1080p"], "steps": [
+            {"name": "a", "module": "jackett", "action": "get", "config": {"search_preference": ["old"]}},
+            {"name": "b", "module": "library", "action": "put", "input": "previous"},
+            # the download directory of a torrent client is not the library folder
+            {"name": "c", "module": "qbittorrent", "action": "put", "input": "a"},
+        ]})
+
+    configs = [flow._load_module(step=step).config for step in flow.steps]
+
+    assert flow.valid
+    assert configs == [
+        {"search_preference": ["HUN", "1080p"], "kind": "movie"},
+        {"kind": "movie", "directory": "films", "search_preference": ["HUN", "1080p"]},
+        {"kind": "movie"},
+    ]
+
+
+def test_module_and_step_values_of_flow_settings_are_ignored(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Library folder and release preference come only from the flow."""
+    monkeypatch.setattr(runner, "load_module", lambda name: ActionModule)
+    flow = runner.Flow(str(tmp_path / "f.yaml"), definition={"steps": [
+        {"name": "a", "module": "library", "action": "get",
+         "config": {"directory": "other", "search_preference": ["x"]}}]})
+
+    assert flow._load_module(step=flow.steps[0]).config == {
+        "directory": "movie", "search_preference": [], "kind": "movie"}
+
+
+def test_library_folder_defaults_to_the_media_kind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(runner, "load_module", lambda name: ActionModule)
+    monkeypatch.setattr(runner, "cfg", lambda key: {})
+    flow = runner.Flow(str(tmp_path / "tv.yaml"), definition={"kind": "tv", "steps": [
+        {"name": "a", "module": "library", "action": "get"}]})
+
+    assert flow._load_module(step=flow.steps[0]).config == {"kind": "tv", "directory": "tv", "search_preference": []}
+
+
+@pytest.mark.parametrize("definition", [
+    {"library_directory": "/abs/path", "steps": [{"name": "a", "module": "library", "action": "get"}]},
+    {"library_directory": "../outside", "steps": [{"name": "a", "module": "library", "action": "get"}]},
+    {"search_preference": "HUN", "steps": [{"name": "a", "module": "jackett", "action": "get"}]},
+])
+def test_flow_with_invalid_flow_settings_does_not_run(tmp_path: Path, definition: dict) -> None:
+    assert runner.Flow(str(tmp_path / "bad.yaml"), definition=definition).valid is False

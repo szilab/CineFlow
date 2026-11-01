@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 import requests
 from cineflow.core.bases.module import TorrentClientBase
 from cineflow.core.schema import (
-    ModuleDefinition, ActionDefinition, Field, KIND, INPUT_DATA, INPUT_QUERY, consumer_actions,
+    ModuleDefinition, ActionDefinition, Field, INPUT_DATA, INPUT_QUERY, consumer_actions,
 )
 from cineflow.core.logger import log
 from cineflow.utils.misc import release_parsers
@@ -33,7 +33,6 @@ class Transmission(TorrentClientBase):
             Field('password', 'secret', 'Password'),
             Field('directory', 'string', 'Download directory',
                   "Download directory on the client's machine.", step=True),
-            KIND,
             Field('rpc_path', 'string', 'RPC path', default='transmission/rpc', advanced=True),
         ),
         actions=(

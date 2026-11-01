@@ -77,7 +77,6 @@ jackett:
   url:
   token:
   categories: "2000"
-  search_preference: ["HUN", "HDR", "1080p", "2160p"]
 
 jellyfin:
   url:
@@ -105,10 +104,8 @@ qbittorrent:
   tags:
 
 library:
-  directory: movies
   limit: 50
   age: 30
-  search_preference: ["HUN", "HDR", "1080p", "2160p"]
 ```
 
 Only configure modules that are actually used by your workflows. CineFlow does not require all integrations to be configured.
@@ -123,14 +120,22 @@ tmdb:
   language: en-US
 ```
 
+TMDb and Jackett also accept `limit`, a safety cap on the items one *Get*
+collects (default 200, about 10 pages of TMDb trending titles). It is
+not shown in the GUI and normally needs no value. Jellyfin and Plex have no
+such setting.
+
 Common settings:
 
 - `token` — required API token;
-- `language` — metadata language, default `en-US`;
-- `quick_match` — optionally allow a single search result to match without strict year comparison.
+- `language` — metadata language, default `en-US`.
 
-`get` collects the weekly trending list. The trending endpoint has no region
-filter, so the former `region` setting had no effect and is no longer read.
+Matching is always strict: a search result matches when its TMDb or IMDb ID
+is the same, or when its title (or alternative title) and year are the same.
+Series without a known year match by title alone.
+
+`get` collects the weekly trending list (the trending endpoint has no region
+filter).
 IMDb IDs are looked up only for collected or matched items, and those lookups
 are cached for 30 days. `search` uses the TMDb ID when present, otherwise the
 IMDb ID, and falls back to a title search.
@@ -143,12 +148,12 @@ jackett:
   token: API_KEY
   include: HUN
   size_limit_gb: 26
-  search_preference: ["HUN", "HDR", "1080p", "2160p"]
 ```
 
 Jackett can be used directly with download clients or omitted from workflows that
-use future higher-level integrations such as Radarr/Sonarr. Earlier
-`search_preference` entries receive higher scores and sort the Jackett results.
+use future higher-level integrations such as Radarr/Sonarr. The flow's
+`search_preference` (see [Flow settings](#flow-settings)) sorts the Jackett
+results: earlier entries receive higher scores.
 Results that only carry a magnet URI use it as their `link`.
 
 A `get` step query supports `include` (all words must be present), `exclude`,
@@ -221,25 +226,24 @@ The internal library module creates and manages exported/dummy media entries und
 
 ```yaml
 library:
-  directory: movies
   limit: 50
   age: 30
 ```
 
-- `directory` — subdirectory inside `EXPORT_DIRECTORY`;
 - `limit` — maximum retained exported items (default 500, minimum 10);
-- `age` — maximum age in days before cleanup (default 120, minimum 30);
-- `search_preference` — release name preferences used to rank releases.
+- `age` — maximum age in days before cleanup (default 120, minimum 30).
+
+The library folder and the release preference are flow settings (see
+[Flow settings](#flow-settings)).
 
 A background worker applies `limit` and `age` once an hour for every library
 directory used by a flow. The first cleanup runs one hour after start, so
 reading the library with `get` never deletes items.
 
-Earlier `search_preference` entries receive higher scores. When CineFlow finds
-a release for an item already exported to the library, it rewrites the item
-only when the new release has a strictly higher score; tracker URL or
-seeder-count changes alone do not refresh it. The library reads only its own
-`search_preference`; copy the Jackett list here to keep the earlier ranking.
+Earlier `search_preference` entries of the flow receive higher scores. When
+CineFlow finds a release for an item already exported to the library, it
+rewrites the item only when the new release has a strictly higher score;
+tracker URL or seeder-count changes alone do not refresh it.
 
 Each exported video file gets the publish time as its modification time.
 Jellyfin derives "Date added" from these timestamps, so sorting the library by
@@ -343,8 +347,11 @@ names.
 
 ## TV Series
 
-Every module accepts `kind: movie` (default) or `kind: tv`, globally or per
-step. With `kind: tv`:
+The media kind is a flow setting: `kind: movie` (default) or `kind: tv` at the
+top of the flow file. The flow passes it to every module it calls, so all steps
+of a flow handle the same kind; use separate flows for movies and series. A
+`kind` in a module section of `config.yaml` or on a step is not a setting and
+has no effect. With `kind: tv`:
 
 - TMDb collects and searches TV shows (`/trending/tv`, `/search/tv`, ...);
 - Jackett searches the TV category (5000) by show title without the year and
@@ -357,10 +364,34 @@ step. With `kind: tv`:
   media server recognizes the placeholder as a series.
 
 A series item may have no year when it comes from a release name; title
-matching then ignores the unknown year. Use a separate library directory for
-series, for example `config: {directory: shows, kind: tv}` on the library
-steps. Mature episode tracking is better left to an optional Sonarr module
+matching then ignores the unknown year. A `kind: tv` flow writes to the `tv`
+library folder by default, so series stay apart from movies. Mature episode tracking is better left to an optional Sonarr module
 (see the roadmap).
+
+## Flow settings
+
+Two settings belong to the flow rather than to a module, because the steps of
+one flow must agree on them:
+
+```yaml
+name: Import media to library
+kind: movie
+library_directory: film          # optional; default: the media kind (movie or tv)
+search_preference: ["HUN", "HDR", "1080p", "2160p"]
+steps: ...
+```
+
+- `library_directory` — the library folder inside `EXPORT_DIRECTORY` (in
+  Docker `/library`, so `film` means `/library/film`). Without a value the
+  folder is named after the flow's media kind: `movie` or `tv`. Every library
+  step of the flow uses it. A torrent client's own `directory` (download
+  folder) is unrelated.
+- `search_preference` — release name words in order of preference. Jackett
+  sorts its results by it, and the library replaces an exported item only with
+  a better-ranked release. Jackett and the library steps of the flow use it.
+
+These come only from the flow: the same keys in the `library` or `jackett`
+section of `config.yaml` or in a step `config` have no effect.
 
 ## Validation
 
