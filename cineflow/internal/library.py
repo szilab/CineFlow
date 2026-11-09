@@ -1,5 +1,6 @@
 """This module provides a class to handle directories."""
 
+from dataclasses import fields
 from typing import List, Dict
 from PIL import Image
 from cineflow.core.logger import log
@@ -22,7 +23,7 @@ POSTER_RULE = (
     Field('modification', 'select', 'Change', options=('border', 'triangle', 'grayscale'),
           option_labels=('border', 'corner', 'black and white'), default='border'),
     Field('color', 'select', 'Color', "Of the border or the corner.",
-          options=tuple(KnownColors.__dataclass_fields__), default='red'),
+          options=tuple(f.name for f in fields(KnownColors)), default='red'),
     Field('position', 'select', 'Corner', options=('top-left', 'top-right', 'bottom-left', 'bottom-right'),
           option_labels=('top left', 'top right', 'bottom left', 'bottom right'), default='top-right'),
 )
