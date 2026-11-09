@@ -197,3 +197,15 @@ def test_session_is_opened_on_first_rpc_request() -> None:
     assert client._rpc_request("torrent-get") == {"result": "success"}
     client._get_session_id.assert_called_once_with()
     assert client._handler.post.call_args.kwargs["headers"] == {"X-Transmission-Session-Id": "first-session"}
+
+
+def test_get_collects_at_most_the_limit() -> None:
+    client = transmission()
+    client._rpc_request = Mock(return_value={"torrents": [
+        {"name": f"Film{n}.2024.1080p", "status": 4, "percentDone": 1} for n in range(5)]})
+    client._data_mappings = {"title": ["name"], "year": ["name"]}
+    client._data_transforms = {"title": lambda value: value.split(".")[0], "year": lambda value: value.split(".")[1]}
+    client._empty_property_allowed = False
+    client._limit = 3
+
+    assert [item["title"] for item in client.get()] == ["Film0", "Film1", "Film2"]

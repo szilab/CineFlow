@@ -12,7 +12,6 @@ from cineflow.core.logger import log
 from cineflow.core.config import Config
 from cineflow.core.database import Database
 from cineflow.core.runner import FlowManager
-from cineflow.runtime import bootstrap_configuration
 from cineflow.utils.directory import CleanupScheduler
 
 
@@ -171,7 +170,6 @@ def main(argv: Sequence[str] | None = None):
         web_port = _web_port(args.web_port)
     except ValueError as exc:
         raise SystemExit(f"Invalid web port: {exc}") from exc
-    bootstrap_configuration()
     app = MainApp(web_port=web_port)
 
     def shutdown(_signum, _frame):

@@ -3,11 +3,34 @@
 from typing import List, Dict
 from PIL import Image
 from cineflow.core.logger import log
-from cineflow.utils.misc import evaluate, fix_imdbid, search_preference_score
-from cineflow.utils.image import ImageHandler
+from cineflow.utils.misc import evaluate, fix_imdbid, sanitize_name, search_preference_score
+from cineflow.utils.image import ImageHandler, KnownColors
 from cineflow.core.bases.module import LibraryBase
+from cineflow.runtime import EXPORT_ENVIRONMENT
 from cineflow.core.schema import (
-    ModuleDefinition, ActionDefinition, Field, INPUT_DATA, INPUT_NONE,
+    ModuleDefinition, ActionDefinition, Field, INPUT_DATA, INPUT_NONE, ITEM_FIELDS, MUST_MATCH,
+)
+
+POSTER_RULE = (
+    Field('property', 'select', 'Field', options=ITEM_FIELDS, required=True),
+    Field('expression', 'select', 'Match',
+          options=('token', 'contains', 'eq', 'ne', 'gt', 'lt', 'exists', 'missing'),
+          option_labels=('has word', 'contains', 'equals', 'not equals', 'greater than', 'less than',
+                         'exists', 'missing'), default='exists'),
+    Field('value', 'string', 'Value', "Not needed for exists and missing."),
+    Field('case_sensitive', 'boolean', 'Case sensitive', default=True, hidden=True),
+    Field('modification', 'select', 'Change', options=('border', 'triangle', 'grayscale'),
+          option_labels=('border', 'corner', 'black and white'), default='border'),
+    Field('color', 'select', 'Color', "Of the border or the corner.",
+          options=tuple(KnownColors.__dataclass_fields__), default='red'),
+    Field('position', 'select', 'Corner', options=('top-left', 'top-right', 'bottom-left', 'bottom-right'),
+          option_labels=('top left', 'top right', 'bottom left', 'bottom right'), default='top-right'),
+)
+POSTER_RULES = Field(
+    'poster_rules', 'list', 'Poster rules',
+    "Change the posters of the items that match: a colored border or corner, or black and white. "
+    "Every matching rule applies, in order.",
+    item_type='object', item_fields=POSTER_RULE, item_label='Rule',
 )
 
 
@@ -16,17 +39,23 @@ class Library(LibraryBase):
     Module to handle media library.
 
     Configuration:
+        - export_directory: root of the library folders (default: <CINEFLOW_HOME>/library);
+          the EXPORT_DIRECTORY environment variable overrides it
         - limit: number of maximum items in library (default: 500, minimum: 10)
         - age: maximum age of items in library in days (default: 120, minimum: 30)
 
+    Given by the 'put' step:
+        - poster_rules: poster changes (border, corner, black and white) of matching items
+
     Given by the flow:
-        - directory: library folder inside EXPORT_DIRECTORY (flow ``library_directory``,
+        - directory: library folder inside the export directory (flow ``library_directory``,
           default: the media kind)
         - search_preference: release name preferences used to rank releases
         - kind: 'movie' (default) or 'tv'; series get a 'Season NN' folder
 
     Functions:
         - get: list the media in the library
+        - enrich: add the stored data of the matching library items to the items
         - put: import media to the library
         - remove: remove media from the library
 
@@ -37,18 +66,23 @@ class Library(LibraryBase):
         id='library', label='Library', category='internal',
         description="Exported placeholder library that a media server can scan.",
         fields=(
+            Field('export_directory', 'string', 'Export directory',
+                  "Folder of the exported libraries that the media server scans; every flow creates its "
+                  "library folder inside it. Empty: the library folder of the application data.",
+                  env=EXPORT_ENVIRONMENT),
             Field('limit', 'integer', 'Item limit', "Maximum number of items kept.",
                   default=500, minimum=10, step=True),
             Field('age', 'integer', 'Maximum age (days)', "Older items are removed.",
                   default=120, minimum=30, step=True),
-            Field('rules', 'list', 'Poster rules',
-                  "Poster modification rules (list of mappings).", advanced=True, item_type='object'),
         ),
         actions=(
             ActionDefinition('get', 'Get library items', "List the exported items.",
                              input=INPUT_NONE, retrieval=True),
+            ActionDefinition('enrich', 'Enrich with Library',
+                             "Add the data stored with the matching library item (data.json) to each item.",
+                             input=INPUT_DATA, fields=(MUST_MATCH,)),
             ActionDefinition('put', 'Export to library', "Export items with posters to the library.",
-                             input=INPUT_DATA, side_effects=True),
+                             input=INPUT_DATA, side_effects=True, fields=(POSTER_RULES,)),
             ActionDefinition('remove', 'Remove from library', "Delete the items from the library.",
                              input=INPUT_DATA, output='none', destructive=True),
         ),
@@ -91,6 +125,42 @@ class Library(LibraryBase):
             if mapped_item:
                 data.append(mapped_item)
         return data
+
+    def enrich(self, data: List[Dict]) -> List[Dict]:
+        """Add the stored data of the matching library item to each item; its own values win.
+
+        Items match by TMDb or IMDb ID, else by title (or alternate title) and
+        year; a series without a known year matches by title. Items without a
+        match pass on unchanged, or are dropped with ``must_match``.
+        """
+        stored = []
+        for directory in self._handler.all():
+            if self._valid_item_name(directory.name) and (media := self._handler.imprt(item=directory.name)):
+                stored.append({**media, 'directory': directory.name})
+        result = []
+        for media in data or []:
+            if match := self._stored_match(items=stored, media=media):
+                for key, value in match.items():
+                    media.setdefault(key, value)
+                log(f"Item '{media.get('title')}' ({media.get('year')}) extended from the library.")
+            elif self.cfg('must_match', default=False):
+                log(f"Item '{media.get('title')}' ({media.get('year')}) not in the library, dropped.", level='MSG')
+                continue
+            result.append(media)
+        return result
+
+    def _stored_match(self, items: List[Dict], media: dict) -> Dict | None:
+        """Return the stored item of the same identity, else of the same title and year."""
+        if match := next((item for item in items if self._same_identity(first=item, second=media)), None):
+            return match
+        titles = {sanitize_name(media.get(key)).lower() for key in ('title', 'alttitle')} - {''}
+        for item in items:
+            if sanitize_name(item.get('title')).lower() not in titles:
+                continue
+            year_unknown = self.kind == 'tv' and not (item.get('year') and media.get('year'))
+            if year_unknown or str(item.get('year')) == str(media.get('year')):
+                return item
+        return None
 
     def put(self, data: List[Dict]) -> List[Dict]:
         """Import the media to the library."""
@@ -193,9 +263,23 @@ class Library(LibraryBase):
         if not img:
             log(f"Failed to load image for item '{media['title']}'.")
             return None
-        if not self.cfg('rules'):
-            log("No modification rules to apply to the library images.")
+        rules = self.cfg('poster_rules')
+        if not rules:
             return img
+        for rule in rules:
+            if not isinstance(rule, dict) or not rule.get('property'):
+                log(f"Invalid poster rule: {rule}", level='WARNING')
+                continue
+            value = media.get(rule.get('property'))
+            if evaluate(
+                # numbers such as seeders are compared as text digits
+                left=None if value is None else str(value),
+                right=None if rule.get('value') is None else str(rule.get('value')),
+                expression=rule.get('expression', 'exists'),
+                wcase=rule.get('case_sensitive', True)
+            ):
+                img.apply_from_rule(rule={'modification': 'border', **rule})
+        return img
         for rule in self.cfg('rules'):
             if not isinstance(rule, dict) or not rule.get('property'):
                 log(f"Invalid library modification: {rule}", level='WARNING')
@@ -206,5 +290,5 @@ class Library(LibraryBase):
                 expression=rule.get('expression', 'exists'),
                 wcase=rule.get('case_sensitive', True)
             ):
-                img.apply_from_rule(rule=rule)
+                img.apply_from_rule(rule={'modification': 'border', **rule})
         return img

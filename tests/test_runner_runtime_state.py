@@ -149,7 +149,7 @@ def test_reset_modules_rebuilds_instances(make_flow) -> None:
 
 
 def test_manager_refresh_and_status_helpers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv('CFG_DIRECTORY', str(tmp_path))
+    monkeypatch.setattr(runner, "config_directory", lambda: tmp_path)
     monkeypatch.setattr(runner.FlowManager, 'start', lambda self: None)
     monkeypatch.setattr(runner, 'cfg', lambda *args, **kwargs: 'sequential')
     manager = runner.FlowManager()

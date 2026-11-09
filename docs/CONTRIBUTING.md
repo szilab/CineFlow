@@ -64,11 +64,12 @@ uv manages the project's `.venv`; do not activate it manually for normal develop
 Create a test configuration file for development:
 
 ```bash
-# Create config directory
-mkdir -p test-config
+# Use a separate application folder: test-home/cineflow
+export XDG_CONFIG_HOME="$PWD/test-home"
+mkdir -p test-home/cineflow/config
 
 # Create minimal config.yaml for testing
-cat > test-config/config.yaml << EOF
+cat > test-home/cineflow/config/config.yaml << EOF
 tmdb:
   token: "your_test_token_here"
   lang: "en-US"
@@ -119,7 +120,7 @@ EOF
    uv run pytest
 
    # Test CLI functionality
-   $env:CFG_DIRECTORY = "test-config"
+   $env:APPDATA = "$PWD\test-home"   # application folder: test-home\cineflow
    $env:LOG_LEVEL = "DEBUG"
    uv run cineflow
    ```
@@ -261,7 +262,7 @@ Use the bug report template and include:
 ### Common Issues
 
 - **Import errors**: Run `uv sync` to create or update the development environment.
-- **Config not found**: Set `CFG_DIRECTORY` environment variable
+- **Config not found**: The configuration is in `<CINEFLOW_HOME>/config`, see `docs/CONFIGURATION.md`
 - **API timeouts**: Check network connectivity and API credentials
 
 Thank you for contributing to CineFlow! 🎬

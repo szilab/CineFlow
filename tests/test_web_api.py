@@ -214,6 +214,78 @@ def test_connection_test_uses_unsaved_settings(api: Api, monkeypatch: pytest.Mon
     assert instances['jellyfin']['test'] == {'ok': True, 'message': 'Connected'}
 
 
+def test_dropdown_choices_come_from_the_instance_service(api: Api, monkeypatch: pytest.MonkeyPatch) -> None:
+    from cineflow.integrations.jellyfin import Jellyfin
+
+    calls = []
+
+    class FakeJellyfin:
+        DEFINITION = Jellyfin.DEFINITION
+
+        def __init__(self, config):
+            self.config = config
+
+        def field_choices(self, source):
+            calls.append((self.config['url'], source))
+            return {'libraries': ['Anime', 'Movies'], 'users': ['adam']}.get(source)
+
+    monkeypatch.setattr(api_module.catalog, 'module_class', lambda module_id: FakeJellyfin)
+
+    assert ok(api.handle('GET', '/api/instances/jellyfin/choices/libraries')) == {'choices': ['Anime', 'Movies']}
+    assert ok(api.handle('GET', '/api/instances/jellyfin/choices/users')) == {'choices': ['adam']}
+    # reused for a while, read again after the settings change
+    ok(api.handle('GET', '/api/instances/jellyfin/choices/libraries'))
+    assert calls == [('http://jf', 'libraries'), ('http://jf', 'users')]
+    ok(api.handle('PUT', '/api/instances/jellyfin', {'config': {'url': 'http://other'}}))
+    ok(api.handle('GET', '/api/instances/jellyfin/choices/libraries'))
+    assert calls[-1] == ('http://other', 'libraries')
+
+
+def test_dropdown_choices_failures(api: Api, monkeypatch: pytest.MonkeyPatch) -> None:
+    # unknown list, list of another module, not set up, unknown instance
+    assert api.handle('GET', '/api/instances/jellyfin/choices/nothing')[0] == 404
+    assert api.handle('GET', '/api/instances/tmdb/choices/libraries')[0] == 404
+    assert api.handle('GET', '/api/instances/plex/choices/libraries')[0] == 409
+    assert api.handle('GET', '/api/instances/ghost/choices/libraries')[0] == 404
+
+    from cineflow.integrations.jellyfin import Jellyfin
+
+    class Broken:
+        DEFINITION = Jellyfin.DEFINITION
+
+        def __init__(self, config):
+            pass
+
+        def field_choices(self, source):
+            raise ValueError('Failed to query Jellyfin libraries: HTTP 500')
+
+    monkeypatch.setattr(api_module.catalog, 'module_class', lambda module_id: Broken)
+    status, payload = api.handle('GET', '/api/instances/jellyfin/choices/libraries')
+    assert status == 502 and 'HTTP 500' in payload['error']['message']
+
+    class Silent(Broken):
+        def field_choices(self, source):
+            return None
+
+    monkeypatch.setattr(api_module.catalog, 'module_class', lambda module_id: Silent)
+    assert api.handle('GET', '/api/instances/jellyfin/choices/users')[0] == 404
+
+
+def test_library_fields_declare_dropdown_choices(api: Api) -> None:
+    modules = {item['id']: item for item in ok(api.handle('GET', '/api/catalog'))['modules']}
+    query = {spec['key']: spec['choices'] for spec in modules['jellyfin']['actions'][0]['query']}
+
+    assert query['parentLibrary'] == 'libraries' and query['userName'] == 'users'
+    assert query['isFavorite'] == ''
+    # one User dropdown: its "All" entry writes allUsers, which has no field of its own
+    specs = {spec['key']: spec for spec in modules['jellyfin']['actions'][0]['query']}
+    assert specs['userName']['all_key'] == 'allUsers' and specs['allUsers']['hidden'] is True
+    # one Libraries choice: All / Only / All except, with one or more libraries
+    library = next(spec for spec in modules['jellyfin']['actions'][2]['query'] if spec['key'] == 'parentLibrary')
+    inverse = next(spec for spec in modules['jellyfin']['actions'][2]['query'] if spec['key'] == 'isInverse')
+    assert library['multiple'] is True and library['inverse_key'] == 'isInverse' and inverse['hidden'] is True
+
+
 def test_connection_test_failures(api: Api, monkeypatch: pytest.MonkeyPatch) -> None:
     assert api.handle('POST', '/api/instances/library/test')[0] == 400
     assert ok(api.handle('POST', '/api/instances/plex/test'))['ok'] is False
@@ -400,6 +472,7 @@ def test_http_server_serves_api_and_static_files(config_dir: Path) -> None:
         status, headers, body = request(port, 'GET', '/')
         assert status == 200 and b'CineFlow' in body and "frame-ancestors" in headers['Content-Security-Policy']
         assert request(port, 'GET', '/static/app.js')[0] == 200
+        assert request(port, 'GET', '/static/funnel.js')[0] == 200
         assert request(port, 'GET', '/static/../api.py')[0] == 404
         assert request(port, 'GET', '/static/%2e%2e/api.py')[0] == 404
         assert request(port, 'GET', '/missing.css')[0] == 404
@@ -532,3 +605,19 @@ def test_test_all_connections_tests_only_complete_ones(api: Api, monkeypatch: py
 
     assert set(results) == {'tmdb', 'jellyfin'}
     assert sorted(tested) == ['http://jf', 'secret-token']
+
+
+def test_settings_set_by_the_environment_are_reported_read_only(
+    api: Api, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv('EXPORT_DIRECTORY', str(tmp_path / 'share'))
+    monkeypatch.setenv('JELLYFIN_TOKEN', 'from-env')
+    instances = {item['id']: item for item in ok(api.handle('GET', '/api/instances'))['instances']}
+
+    assert instances['library']['environment'] == {
+        'export_directory': {'name': 'EXPORT_DIRECTORY', 'value': str(tmp_path / 'share')}}
+    # secrets are never sent, only that the environment sets them
+    assert instances['jellyfin']['environment'] == {'token': {'name': 'JELLYFIN_TOKEN', 'value': None}}
+    catalog = ok(api.handle('GET', '/api/catalog'))
+    assert catalog['export_directory'] == str((tmp_path / 'share').resolve())
+    assert catalog['default_export_directory'] == str(tmp_path / 'home' / 'cineflow' / 'library')

@@ -11,7 +11,7 @@ from typing import Any
 
 from cineflow.core import catalog
 from cineflow.core.schema import (
-    FLOW_SETTINGS, MEDIA_KINDS, Issue, error, warning, has_errors, validate_fields, validate_value, get_path,
+    FLOW_SETTINGS, FLOW_KINDS, Issue, error, warning, has_errors, validate_fields, validate_value, get_path,
 )
 
 EXECUTION_MODES = ('parallel', 'sequential')
@@ -77,11 +77,28 @@ def validate_module_config(module_id: str, values: Any, path: tuple = (), requir
     )
 
 
+def unknown_setting_issues(fields: tuple, values: Any, path: tuple = ()) -> list[Issue]:
+    """Warn about settings no field defines: they have no effect."""
+    if not isinstance(values, dict):
+        return []
+    known = {item.key.split('.')[0] for item in fields}
+    return [
+        warning((*path, key), f"Unknown setting '{key}': it has no effect.", 'unknown')
+        for key in values if key not in known
+    ]
+
+
+def _module_fields(module_id: str) -> tuple:
+    definition = catalog.definition(module_id)
+    return definition.fields if definition else ()
+
+
 def validate_instance(config: dict, instance_id: str) -> list[Issue]:
     """Validate a named instance or a module default with its inherited settings."""
     config = config or {}
     if instance_id in catalog.module_ids():
-        return validate_module_config(instance_id, instance_config(config, instance_id), (instance_id,))
+        return validate_module_config(instance_id, instance_config(config, instance_id), (instance_id,)) \
+            + unknown_setting_issues(_module_fields(instance_id), config.get(instance_id), (instance_id,))
     path = ('instances', instance_id)
     instance = instances(config).get(instance_id)
     if not isinstance(instance, dict):
@@ -97,6 +114,9 @@ def validate_instance(config: dict, instance_id: str) -> list[Issue]:
         return issues + [error((*path, 'config'), "Expected a mapping.", 'type')]
     issues.extend(validate_module_config(
         instance['module'], instance_config(config, instance_id), (*path, 'config'),
+    ))
+    issues.extend(unknown_setting_issues(
+        _module_fields(instance['module']), instance.get('config'), (*path, 'config'),
     ))
     return issues
 
@@ -122,6 +142,7 @@ def validate_config(config: Any) -> list[Issue]:  # noqa: C901
         else:
             # module defaults may be partial: steps and instances complete them
             issues.extend(validate_module_config(key, value, (key,), required=False))
+            issues.extend(unknown_setting_issues(_module_fields(key), value, (key,)))
     raw_instances = config.get('instances')
     if raw_instances is not None and not isinstance(raw_instances, dict):
         issues.append(error(('instances',), "Instances must be a mapping.", 'type'))
@@ -267,10 +288,7 @@ def _step_issues(step: Any, index: int, earlier: list[str], config: dict) -> lis
                     (*path, 'config', *issue.path),
                     f"{issue.message} Set it in the module settings or the step.", issue.code,
                 ))
-    known = {item.key.split('.')[0] for item in (*definition.fields, *action_fields)}
-    for key in step_config:
-        if key not in known:
-            issues.append(warning((*path, 'config', key), f"Unknown setting '{key}'.", 'unknown'))
+    issues.extend(unknown_setting_issues((*definition.fields, *action_fields), step_config, (*path, 'config')))
     issues.extend(_input_issues(step.get('input'), (*path, 'input'), index, earlier, action))
     return issues
 
@@ -296,8 +314,8 @@ def validate_flow(flow: Any, config: dict | None = None) -> list[Issue]:  # noqa
         issues.append(error(('priority',), "Priority must be a whole number.", 'type'))
     if 'description' in flow and not isinstance(flow['description'], (str, type(None))):
         issues.append(error(('description',), "Expected text.", 'type'))
-    if flow.get('kind') is not None and flow.get('kind') not in MEDIA_KINDS:
-        issues.append(error(('kind',), "Expected one of: movie, tv.", 'choice'))
+    if flow.get('kind') is not None and flow.get('kind') not in FLOW_KINDS:
+        issues.append(error(('kind',), "Expected one of: movie, tv, both.", 'choice'))
     for flow_key, setting in FLOW_SETTINGS.items():
         if flow.get(flow_key) not in (None, '', []):
             issues.extend(validate_value(setting.field, flow[flow_key], (flow_key,)))

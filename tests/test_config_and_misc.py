@@ -21,7 +21,7 @@ from cineflow.utils.misc import (
 
 
 def test_config_persists_nested_values_and_honors_defaults(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr("cineflow.core.config.config_directory", lambda: tmp_path)
     config = Config()
     config.set("tmdb.token", "secret")
 
@@ -40,7 +40,7 @@ def test_config_uses_suite_isolated_directory(isolated_config_directory) -> None
 
 
 def test_config_required_and_environment_module_override(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr("cineflow.core.config.config_directory", lambda: tmp_path)
     monkeypatch.setenv("TMDB_TOKEN", "environment-token")
 
     assert Config.getfrom({"token": "file-token"}, "token", module="tmdb") == "environment-token"
@@ -100,11 +100,16 @@ def test_media_parsing_sorting_and_module_lookup() -> None:
     assert load_module("not_a_module") is None
 
 
-def test_search_preference_score_rewards_earlier_preferences() -> None:
+def test_search_preference_score_is_a_strict_priority() -> None:
     preferences = ["HUN", "HDR", "1080p", "2160p"]
+    score = lambda name: search_preference_score(name, preferences)  # noqa: E731
 
-    assert search_preference_score("Movie.2024.1080p.HUN", preferences) == 9
-    assert search_preference_score("Movie.2024.1080p.HUN.HDR", preferences) == 13
+    # the first word decides: one HUN release beats any release without it
+    assert score("Movie.2024.720p.HUN") > score("Movie.2024.2160p.HDR.1080p.ENG")
+    # the next word only decides on a tie
+    assert score("Movie.2024.1080p.HUN.HDR") > score("Movie.2024.1080p.HUN") > score("Movie.2024.2160p.HUN")
+    assert score("Movie.2024.1080p.HUN") == 1 + 16 + 4
+    assert score("Movie.2024.WEB") == search_preference_score("Movie.2024.WEB") == 1
     assert search_preference_score(None, preferences) == 0
 
 
@@ -164,10 +169,22 @@ def test_fix_imdbid(value, expected) -> None:
         ("Hungry.Movie.2000", "hun", "token", False, False),
         ("Some_Movie-HUN", "hun", "token", False, True),
         ("Some.Movie.HUN", "hun", "token", True, False),
+        ("12.5", "20", "lt", True, True), ("5", "5.0", "eq", True, True), ("5", "6", "ne", True, True),
+        ("5", "5", "ne", True, False),
     ],
 )
 def test_evaluate_operators(left, right, expression, case, expected) -> None:
     assert evaluate(left, right, expression, case) is expected
+
+
+def test_has_word_separates_words_at_any_non_alphanumeric_character() -> None:
+    from cineflow.utils.misc import has_word
+
+    for text in ("Movie.HUN.x264", "Movie-HUN-GRP", "Movie_HUN", "Movie [HUN]", "HUN", "Movie(HUN)"):
+        assert has_word(text, "HUN"), text
+    assert not has_word("Hungry.Movie", "HUN")
+    assert not has_word("Movie.hun", "HUN") and has_word("Movie.hun", "HUN", case_sensitive=False)
+    assert not has_word(None, "HUN") and not has_word("Movie", "") and has_word(2160, 2160)
 
 
 def test_broken_config_at_startup_raises_a_clear_error(isolated_config_directory) -> None:

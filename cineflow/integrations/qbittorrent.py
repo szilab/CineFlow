@@ -5,10 +5,13 @@ from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Dict, List
 from cineflow.core.bases.module import TorrentClientBase
 from cineflow.core.schema import (
-    ModuleDefinition, ActionDefinition, Field, INPUT_DATA, INPUT_QUERY, consumer_actions,
+    ModuleDefinition, ActionDefinition, Field, LIMIT, INPUT_DATA, INPUT_QUERY, RENAME_FOLDERS,
+    DELETE_TORRENTS, MOVE_TORRENTS, TORRENT_QUERY,
+    consumer_actions,
 )
 from cineflow.core.logger import log
 from cineflow.utils.misc import release_parsers
+from cineflow.utils.torrent import link_hash
 
 
 class QBittorrent(TorrentClientBase):
@@ -37,13 +40,17 @@ class QBittorrent(TorrentClientBase):
                   "Download directory on the client's machine.", step=True),
             Field('category', 'string', 'Category', step=True, advanced=True),
             Field('tags', 'string', 'Tags', "Comma-separated tags.", step=True, advanced=True),
+            LIMIT,
         ),
         actions=(
             ActionDefinition('get', 'Get torrents', "List the torrents of the client.",
-                             input=INPUT_QUERY, retrieval=True),
+                             input=INPUT_QUERY, query=TORRENT_QUERY, retrieval=True),
             ActionDefinition('put', 'Add torrents', "Add the item release links to the client.",
                              input=INPUT_DATA, side_effects=True),
-            *consumer_actions('qBittorrent')[1:4],
+            RENAME_FOLDERS,
+            MOVE_TORRENTS,
+            DELETE_TORRENTS,
+            *consumer_actions('qBittorrent', query=TORRENT_QUERY)[1:4],
         ),
     )
 
@@ -55,11 +62,13 @@ class QBittorrent(TorrentClientBase):
         self._sid = None
         self._auth_cookies = {}
         self._headers = {'Referer': self._referer(), 'Origin': self._origin()}
-        release_mappings, release_transforms = release_parsers(kind=self._kind, source='name')
+        release_mappings, release_transforms = release_parsers(kind=self._kind, source='name', folder_names=True)
         self._data_mappings = {
             **release_mappings,
             'status': ['state'],
             'percent_done': ['progress'],
+            'torrent_hash': ['hash'],
+            'added': ['added_on'],
         }
         self._data_transforms = release_transforms
         # login happens on the first API request, not at construction time
@@ -76,7 +85,7 @@ class QBittorrent(TorrentClientBase):
         if not response:
             log("No torrents found in qBittorrent.", level='WARNING')
             return []
-        return self._map_torrents(items=response, query=query)
+        return self._map_torrents(items=response, query=query)[:self._limit]
 
     def put(self, data: List[Dict]) -> List[Dict]:
         """Add torrent URLs to the qBittorrent download list."""
@@ -150,9 +159,65 @@ class QBittorrent(TorrentClientBase):
             )
             media['qbittorrent_status'] = 'error'
 
+    def _torrent_hash(self, media: dict) -> str | None:
+        """Return the info hash of the item's torrent, read from its link when unknown."""
+        if not media.get('torrent_hash') and (torrent_hash := link_hash(media.get('link'))):
+            media['torrent_hash'] = torrent_hash
+        return media.get('torrent_hash')
+
+    def _torrent_state(self, torrent_hash: str) -> dict | None:
+        """Return the hash, save path and file names of a torrent."""
+        info = self._api_request('GET', f'api/v2/torrents/info?hashes={torrent_hash}')
+        if not isinstance(info, list) or not info or not isinstance(info[0], dict):
+            return None
+        files = self._api_request('GET', f'api/v2/torrents/files?hash={torrent_hash}')
+        if not isinstance(files, list):
+            return None
+        return {
+            'id': torrent_hash,
+            'directory': info[0].get('save_path') or '',
+            'files': [item.get('name') for item in files if isinstance(item, dict)],
+        }
+
+    def _torrent_locations(self) -> list[tuple[str, str]] | None:
+        """Return the save path and content path of every torrent."""
+        info = self._api_request('GET', 'api/v2/torrents/info')
+        if not isinstance(info, list):
+            return None
+        return [(item.get('save_path') or '', item.get('content_path') or '')
+                for item in info if isinstance(item, dict)]
+
+    def _rename_root(self, state: dict, root: str, target: str) -> bool:
+        """Rename the root folder on the disk; the torrent name stays."""
+        response = self._api_response(
+            'POST', 'api/v2/torrents/renameFolder',
+            data={'hash': state['id'], 'oldPath': root, 'newPath': target}, form=True,
+        )
+        return response is not None and response.status == 200
+
+    def _remove_torrent(self, state: dict, delete_files: bool) -> bool:
+        """Remove the torrent, with its data when ``delete_files``."""
+        response = self._api_response(
+            'POST', 'api/v2/torrents/delete',
+            data={'hashes': state['id'], 'deleteFiles': 'true' if delete_files else 'false'}, form=True,
+        )
+        return response is not None and response.status == 200
+
+    def _move_content(self, state: dict, location: str) -> bool:
+        """Move the torrent data into ``location``."""
+        response = self._api_response(
+            'POST', 'api/v2/torrents/setLocation', data={'hashes': state['id'], 'location': location}, form=True,
+        )
+        return response is not None and response.status == 200
+
     def _api_request(
         self, method: str, endpoint: str, data: dict = None, form: bool = False
     ) -> Any | None:
+        """Make an authenticated qBittorrent WebAPI request; return the response data."""
+        response = self._api_response(method=method, endpoint=endpoint, data=data, form=form)
+        return None if response is None else response.data
+
+    def _api_response(self, method: str, endpoint: str, data: dict = None, form: bool = False):
         """Make an authenticated qBittorrent WebAPI request with one 403 re-login retry."""
         if self.cfg('username', default=None) and not self._sid:
             try:
@@ -176,7 +241,7 @@ class QBittorrent(TorrentClientBase):
             return None
         if response.status == 0:
             return None
-        return response.data
+        return response
 
     def _send_request(self, method: str, endpoint: str, data: dict = None, form: bool = False):
         """Dispatch a request through RequestHandler."""

@@ -13,7 +13,7 @@ from cineflow.core.database import Database
 @pytest.fixture
 def database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Database:
     """Provide an isolated database singleton backed by a temporary file."""
-    monkeypatch.setenv("DB_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr("cineflow.core.database.database_file", lambda: tmp_path / "cachedb.sqlite3")
     SingletonMeta._instances.pop(Database, None)
     instance = Database()
     yield instance
@@ -52,7 +52,7 @@ def test_existing_nonempty_database_gets_missing_schema(
     connection.execute("CREATE TABLE existing (value TEXT);")
     connection.commit()
     connection.close()
-    monkeypatch.setenv("DB_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr("cineflow.core.database.database_file", lambda: tmp_path / "cachedb.sqlite3")
 
     SingletonMeta._instances.pop(Database, None)
     database = Database()

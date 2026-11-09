@@ -4,15 +4,14 @@ import base64
 import json
 import os
 import sqlite3
-import tempfile
 import threading
 from datetime import datetime as dt
-from pathlib import Path
 from typing import Any
 
 from cineflow.core.bases.singleton import SingletonMeta
 from cineflow.core.bases.worker import WorkerBase
 from cineflow.core.logger import log
+from cineflow.runtime import database_file
 
 
 class Database(WorkerBase, metaclass=SingletonMeta):
@@ -21,16 +20,17 @@ class Database(WorkerBase, metaclass=SingletonMeta):
     def __init__(self) -> None:
         super().__init__()
         self.delay = 240
-        self._file = Path(os.environ.get("DB_DIRECTORY", tempfile.gettempdir()), "cachedb.sqlite3")
+        self._file = database_file()
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
         self._cursor: sqlite3.Cursor | None = None
         self._default_expire = int(os.environ.get("CACHE_EXPIRE", "86400"))
         try:
+            self._file.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(self._file, check_same_thread=False)
             self._cursor = self._conn.cursor()
             self.create_tables()
-        except sqlite3.Error as error:
+        except (sqlite3.Error, OSError) as error:
             log(f"Cache database connection error cache database not usable: {error}", level="WARNING")
         log(f"Cache database initialized with file '{self._file.name}'")
         self.start()

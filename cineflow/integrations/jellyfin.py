@@ -4,9 +4,14 @@ from typing import List, Any
 from cineflow.core.logger import log
 from cineflow.core.bases.module import MediaServerBase
 from cineflow.core.schema import (
-    ModuleDefinition, Field, MEDIA_SERVER_QUERY, consumer_actions,
+    ModuleDefinition, ActionDefinition, Field, LIMIT, MEDIA_SERVER_QUERY, INPUT_BOTH, consumer_actions,
 )
-from cineflow.utils.misc import fix_imdbid
+from cineflow.utils.misc import fix_imdbid, plan_season
+WATCHED_PERCENT = Field(
+    'watched_percent', 'integer', 'Watched before the next season (%)',
+    "Share of the latest season's episodes in the libraries that someone must have watched "
+    "before the next season is downloaded.", default=75, minimum=1, maximum=100,
+)
 
 
 class Jellyfin(MediaServerBase):
@@ -32,15 +37,25 @@ class Jellyfin(MediaServerBase):
         fields=(
             Field('url', 'url', 'URL', "Jellyfin base URL, e.g. http://jellyfin:8096.", required=True),
             Field('token', 'secret', 'API key', "Jellyfin API key.", required=True),
+            LIMIT,
             Field('ignore.users', 'list', 'Ignored users', "User names left out of queries.",
                   advanced=True),
         ),
-        actions=consumer_actions('Jellyfin', query=(
+        actions=(*consumer_actions('Jellyfin', query=(
             *MEDIA_SERVER_QUERY,
             Field('isFavorite', 'boolean', 'Favorites only'),
             Field('isPlayed', 'boolean', 'Played'),
-            Field('allUsers', 'boolean', 'All users', "Query every user."),
-            Field('userName', 'string', 'User', "Query one user."),
+            # one dropdown in the GUI: the first user, every user or one user
+            Field('allUsers', 'boolean', 'All users', "Query every user.", hidden=True),
+            Field('userName', 'string', 'User', "Whose items to query; without a choice the first user.",
+                  choices='users', all_key='allUsers'),
+        )), ActionDefinition(
+            'next_season', 'Next season to download',
+            "For TV series: season 1 of a series not in the libraries yet, the missing aired episodes "
+            "of the latest season, or the season after it once enough of it is watched by anyone. "
+            "Other series are dropped.",
+            input=INPUT_BOTH, fields=(WATCHED_PERCENT,),
+            query=tuple(spec for spec in MEDIA_SERVER_QUERY if spec.key in ('parentLibrary', 'isInverse')),
         )),
     )
 
@@ -79,6 +94,75 @@ class Jellyfin(MediaServerBase):
         if self._library_list is None:
             self._library_list = self._get_libraries()
         return self._library_list
+
+    def next_season(self, data: List[dict], query: Any = None) -> List[dict]:
+        """Keep the TV series with a season to download and set that ``season`` on them.
+
+        When only some aired episodes of that season are missing, they are
+        listed in ``wanted_episodes``; otherwise the whole season is wanted.
+
+        The series are looked up in the queried libraries (e.g. every library
+        except the CineFlow ones); an episode counts as watched when any user
+        watched it. Failures stop the step instead of choosing a season blindly.
+        """
+        if not data:
+            return []
+        if self._kind != 'tv':
+            log("'Next season' only works on TV series; the items are passed on unchanged.", level='WARNING')
+            return data
+        query = {**(query if isinstance(query, dict) else {}), 'allUsers': True}
+        series = self._collect(query=query)
+        if series is None:
+            raise ValueError("Failed to query the Jellyfin series, no season is chosen.")
+        users = list(self._users().values())
+        if not users:
+            raise ValueError("No Jellyfin users to read the watched state from.")
+        percent = self.cfg('watched_percent', default=WATCHED_PERCENT.default)
+        chosen = []
+        for media in data:
+            found = self.match(results=series, media=media)
+            have, watched = self._episode_state(found['jellyfinid'], users) if found else (set(), set())
+            plan = plan_season(have, watched, media.get('seasons_aired'), percent)
+            if plan is None:
+                log(f"No season of '{media.get('title')}' to download now.")
+                continue
+            season, missing = plan
+            item = {**media, 'season': season}
+            item.pop('episode', None)
+            item.pop('wanted_episodes', None)
+            if missing:
+                item['wanted_episodes'] = missing
+                log(f"Season {season} of '{media.get('title')}' misses episodes {missing}.")
+            else:
+                log(f"Season {season} of '{media.get('title')}' is next.")
+            chosen.append(item)
+        return chosen
+
+    def _episode_state(self, series_id: str, users: List[str]) -> tuple[set, set]:
+        """Return the (season, episode) pairs of a series in the library and those watched by anyone."""
+        have, watched = set(), set()
+        for user in users:
+            response = self._handler.get(
+                endpoint=f"/Shows/{series_id}/Episodes", params={'UserId': user, 'Fields': 'UserData'},
+            )
+            if response.status == 0 or response.status >= 400 or not isinstance(response.data, dict):
+                raise ValueError(f"Failed to query the episodes of Jellyfin series {series_id}: HTTP {response.status}")
+            for episode in response.data.get('Items') or []:
+                season, number = episode.get('ParentIndexNumber'), episode.get('IndexNumber')
+                # specials and "missing" (virtual) episodes are not in the library
+                if not isinstance(season, int) or not isinstance(number, int) or season < 1 \
+                        or episode.get('LocationType') == 'Virtual':
+                    continue
+                have.add((season, number))
+                if (episode.get('UserData') or {}).get('Played'):
+                    watched.add((season, number))
+        return have, watched
+
+    def field_choices(self, source: str) -> list[str] | None:
+        """Return the user names besides the library names."""
+        if source == 'users':
+            return sorted(self._users())
+        return super().field_choices(source)
 
     def _parse_query(self, query: Any) -> dict:
         if isinstance(query, dict) and query.get("isInverse") and query.get("perUser"):

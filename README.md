@@ -102,7 +102,7 @@ TMDb → Radarr
 
 The same workflow engine is responsible for passing media data between modules.
 
-Current default examples include:
+Typical flows:
 
 1. **Discovery**  
    Flows periodically collect trending or popular movies from TMDb or recent releases from Jackett.
@@ -167,10 +167,9 @@ To confirm the downloaded version without starting the worker:
 docker run -d \
   --name cineflow \
   --restart unless-stopped \
-  -v /path/to/library:/data \
-  -v /path/to/config:/config \
-  -e CFG_DIRECTORY=/config \
-  -e EXPORT_DIRECTORY=/data \
+  -v /path/to/cineflow-data:/data \
+  -v /path/to/library:/library \
+  -e EXPORT_DIRECTORY=/library \
   ghcr.io/szilab/cineflow:latest
 ```
 
@@ -183,18 +182,18 @@ services:
     container_name: cineflow
     restart: unless-stopped
     volumes:
-      - /path/to/library:/data
-      - /path/to/config:/config
+      - /path/to/cineflow-data:/data
+      - /path/to/library:/library
     environment:
-      CFG_DIRECTORY: /config
-      EXPORT_DIRECTORY: /data
+      EXPORT_DIRECTORY: /library
       LOG_LEVEL: INFO
       TMDB_TOKEN: your_tmdb_token
 ```
 
-When running via Docker:
-* If the configuration directory is empty, **default example flows are copied automatically**
-* These flows provide a ready-to-use automation setup
+The image keeps everything in `/data/cineflow` (`XDG_CONFIG_HOME=/data`).
+`EXPORT_DIRECTORY` is only needed when the media server reads the library from
+another mount. CineFlow starts without flows; create them in the GUI or as YAML
+files.
 
 ## Configuration
 
@@ -213,12 +212,8 @@ For detailed syntax and examples, see:
 
 ### Environment Variables
 
-- `CINEFLOW_HOME`: Application root used for default `config`, `library`, and `media` paths
-- `CFG_DIRECTORY`: Configuration directory path; overrides `CINEFLOW_HOME` for configuration
-- `EXPORT_DIRECTORY`: Library export path; overrides `CINEFLOW_HOME` for exports
-- `MEDIA_DIRECTORY`: Optional directory containing external `sample.<resolution>.mp4` files
-- `EXAMPLES_DIRECTORY`: Example configuration copied into an empty configuration directory on first start
-- `DB_DIRECTORY`: SQLite cache database directory (default: the system temp directory; mount it to keep the cache across restarts)
+- `EXPORT_DIRECTORY`: Library export root; overrides the library module's `export_directory` setting
+  (default: `<CINEFLOW_HOME>/library`)
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
 - `LOG_COLORS`: Enable colored logs (true/false)
 
@@ -226,9 +221,10 @@ Credential values in URLs and parameter maps (`apikey`, `api_key`, `token`, `pas
 
 Module settings may be overridden through environment variables. See `docs/CONFIGURATION.md` for current behavior and known limitations.
 
-Explicit directory variables have highest priority. In the Windows executable,
-the executable's directory is the default application root. Docker supplies
-explicit `/config`, `/library`, and `/app/media` paths, so its layout is unchanged.
+Everything CineFlow keeps lives in one application folder, `CINEFLOW_HOME`:
+`$XDG_CONFIG_HOME/cineflow` (default `~/.config/cineflow`) on Linux,
+`%APPDATA%\cineflow` on Windows and `/data/cineflow` in Docker. See
+[Application folder](docs/CONFIGURATION.md#application-folder).
 
 Module configuration precedence is global configuration, then flow-step `config`, then environment override. Environment overrides preserve an existing boolean, integer, or float type; values without a type hint remain strings.
 

@@ -4,7 +4,7 @@ import pytest
 
 from cineflow.core import catalog, validation
 from cineflow.core.schema import (
-    ActionDefinition, Field, Issue, ModuleDefinition, get_path, has_errors, is_secret_key,
+    ActionDefinition, Field, Issue, ModuleDefinition, get_path, is_secret_key,
     mask_secrets, validate_fields, validate_value,
 )
 
@@ -164,15 +164,6 @@ def flow(*steps, **root) -> dict:
     return {'name': 'F', 'steps': list(steps), **root}
 
 
-def test_bundled_example_flows_are_valid_with_credentials() -> None:
-    import yaml
-    from cineflow.runtime import bundled_examples_directory
-
-    for name in ('from_lib.yaml', 'to_lib.yaml'):
-        data = yaml.safe_load((bundled_examples_directory() / name).read_text())
-        assert not has_errors(validation.validate_flow(data, CONFIG)), name
-
-
 def test_flow_root_validation() -> None:
     issues = validation.validate_flow(
         {'name': '', 'enabled': 'yes', 'delay': 0, 'priority': 'high', 'description': 3, 'extra': 1, 'steps': []},
@@ -306,6 +297,7 @@ def test_media_kind_is_a_flow_setting() -> None:
     ({'steps': []}, 'movie'),
     ({'kind': None, 'steps': []}, 'movie'),
     ({'kind': 'tv', 'steps': []}, 'tv'),
+    ({'kind': 'both', 'steps': []}, 'both'),
     ({'steps': [{'config': {'kind': 'tv'}}]}, 'movie'),
     ({'kind': 'anime', 'steps': []}, None),
     ('x', None),
@@ -320,8 +312,9 @@ def test_limit_is_hidden_and_only_declared_where_it_is_used() -> None:
     definitions = catalog.definitions()
     with_limit = {mid for mid, item in definitions.items() if any(f.key == 'limit' for f in item.fields)}
 
-    assert with_limit == {'tmdb', 'jackett', 'library'}
-    for module_id in ('tmdb', 'jackett'):
+    # every service with a collecting 'get' has the hidden limit; the library's 'limit' is its size
+    assert with_limit == {'tmdb', 'jackett', 'jellyfin', 'plex', 'transmission', 'qbittorrent', 'library'}
+    for module_id in ('tmdb', 'jackett', 'jellyfin', 'plex', 'transmission', 'qbittorrent'):
         spec = next(f for f in definitions[module_id].fields if f.key == 'limit')
         assert spec.to_dict()['hidden'] is True
         assert spec.default == 200
@@ -332,8 +325,8 @@ def test_limit_is_hidden_and_only_declared_where_it_is_used() -> None:
 
 
 def test_list_fields_declare_their_item_type() -> None:
-    rules = next(f for f in catalog.definitions()['library'].fields if f.key == 'rules')
-    assert rules.to_dict()['item_type'] == 'object'
+    rules = catalog.definitions()['library'].action('put').fields[0]
+    assert rules.key == 'poster_rules' and rules.to_dict()['item_type'] == 'object'
     assert Field('words', 'list').to_dict()['item_type'] == 'text'
     with pytest.raises(ValueError):
         Field('words', 'list', item_type='number')
@@ -350,3 +343,56 @@ def test_library_folder_and_release_preference_are_flow_settings() -> None:
     bad.update({'library_directory': '../x', 'search_preference': 'HUN'})
     assert codes(validation.validate_flow(bad, CONFIG)) == [('library_directory', 'format'),
                                                             ('search_preference', 'type')]
+
+
+def test_run_kinds_of_a_flow() -> None:
+    from cineflow.core.schema import run_kinds
+
+    assert run_kinds('movie') == ('movie',)
+    assert run_kinds('tv') == ('tv',)
+    assert run_kinds('both') == ('movie', 'tv')
+
+
+def test_flow_kind_accepts_both_and_rejects_others() -> None:
+    steps = [{'name': 'a', 'module': 'tools', 'action': 'data_import'}]
+
+    def kind_issues(kind):
+        flow = {'name': 'x', 'kind': kind, 'steps': steps}
+        return [issue for issue in validation.validate_flow(flow) if issue.path == ('kind',)]
+
+    assert not kind_issues('both')
+    assert 'both' in kind_issues('anime')[0].message
+
+
+def test_library_query_takes_one_name_or_a_list() -> None:
+    def library_issues(value):
+        flow = {'name': 'x', 'steps': [{'name': 'a', 'module': 'jellyfin', 'action': 'get',
+                                        'input': {'query': {'parentLibrary': value, 'isInverse': True}}}]}
+        return [issue for issue in validation.validate_flow(flow) if 'parentLibrary' in issue.path]
+
+    assert library_issues('Filmek') == []
+    assert library_issues(['Trending Filmek', 'Trending Sorozatok']) == []
+    assert [issue.path for issue in library_issues(['Filmek', {'x': 1}])] == [
+        ('steps', 0, 'input', 'query', 'parentLibrary', 1)]
+
+
+def test_unknown_settings_are_warned_about_as_having_no_effect() -> None:
+    config = {
+        'jackett': {'url': 'http://j', 'token': 't', 'search_preference': ['HUN']},
+        'library': {'directory': 'film'},
+        'instances': {'other': {'module': 'library', 'name': 'Other', 'config': {'directory': 'x'}}},
+    }
+    issues = validation.validate_config(config)
+
+    assert {('.'.join(map(str, issue.path)), issue.code) for issue in issues} >= {
+        ('jackett.search_preference', 'unknown'), ('library.directory', 'unknown'),
+        ('instances.other.config.directory', 'unknown')}
+    assert all(issue.level == 'warning' for issue in issues)
+    assert "Unknown setting 'directory': it has no effect." in {issue.message for issue in issues}
+    # the Modules page shows the same warning for the module settings
+    assert [issue.code for issue in validation.validate_instance(config, 'library')
+            if issue.path == ('library', 'directory')] == ['unknown']
+
+    step = {'name': 'a', 'module': 'library', 'action': 'get', 'config': {'search_preference': ['HUN']}}
+    step_issues = [(issue.path, issue.code) for issue in validation.validate_flow({'name': 'x', 'steps': [step]})]
+    assert step_issues.count((('steps', 0, 'config', 'search_preference'), 'unknown')) == 1

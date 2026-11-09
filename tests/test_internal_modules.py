@@ -1,7 +1,9 @@
 """Tests for internal workflow modules without external services."""
 
+import json
 from pathlib import Path
 
+from cineflow.core import catalog
 from cineflow.internal.library import Library
 from cineflow.internal.tools import Tools
 from cineflow.utils.directory import CleanupScheduler
@@ -196,13 +198,50 @@ def test_library_remove_and_poster_rules(monkeypatch) -> None:
         def apply_from_rule(self, rule): self.rules.append(rule)
     poster = Poster()
     monkeypatch.setattr("cineflow.internal.library.ImageHandler", lambda url: poster)
-    instance.cfg = lambda key: [{"property": "status", "value": "new", "expression": "eq"}] if key == "rules" else None
-    assert instance._create_poster({"title": "Film", "poster": "url", "status": "new"}) is poster
-    assert len(poster.rules) == 1
+    rules = [
+        {"property": "torrent", "value": "HUN", "expression": "token", "modification": "border"},
+        {"property": "seeders", "value": 40, "expression": "gt", "modification": "triangle"},
+        {"property": "size", "value": "20", "expression": "lt", "modification": "grayscale"},
+        {"property": "imdbid", "expression": "missing", "modification": "grayscale"},
+        "not a rule",
+    ]
+    instance.cfg = lambda key: rules if key == "poster_rules" else None
+    media = {"title": "Film", "poster": "url", "torrent": "Film.2024.HUN.1080p", "seeders": 120, "size": 12.5,
+             "imdbid": 42}
+    assert instance._create_poster(media) is poster
+    # numbers such as seeders and size compare as numbers, not text
+    assert [rule["modification"] for rule in poster.rules] == ["border", "triangle", "grayscale"]
+
+
+def test_poster_rules_are_a_setting_of_the_export_step() -> None:
+    from cineflow.core.validation import validate_flow
+
+    definition = catalog.definitions()["library"]
+    assert "rules" not in {spec.key for spec in definition.fields}
+    put = definition.action("put").to_dict()
+    assert [spec["key"] for spec in put["fields"]] == ["poster_rules"]
+    assert [spec["key"] for spec in put["fields"][0]["item_fields"]] == [
+        "property", "expression", "value", "case_sensitive", "modification", "color", "position"]
+
+    def errors(rules) -> list:
+        flow = {"name": "x", "steps": [
+            {"name": "Load", "module": "tools", "action": "data_import"},
+            {"name": "Export", "module": "library", "action": "put", "input": "previous",
+             "config": {"poster_rules": rules}},
+        ]}
+        return [(".".join(map(str, issue.path)), issue.code)
+                for issue in validate_flow(flow, {"library": {}}) if issue.level == "error"]
+
+    assert errors([{"property": "torrent", "expression": "token", "value": "HUN",
+                    "modification": "border", "color": "green", "position": "top-left"}]) == []
+    assert errors([{"property": "torrent", "modification": "sepia", "color": "pink"}]) == [
+        ("steps.1.config.poster_rules.0.modification", "choice"),
+        ("steps.1.config.poster_rules.0.color", "choice"),
+    ]
 
 
 def test_tools_exports_imports_and_removes_duplicate_identity(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("DEBUG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr("cineflow.internal.tools.debug_directory", lambda: tmp_path)
     tools = Tools()
     data = [
         {"title": "One", "year": 2024, "imdbid": 1},
@@ -216,7 +255,7 @@ def test_tools_exports_imports_and_removes_duplicate_identity(tmp_path, monkeypa
 
 
 def test_tools_export_creates_nested_directory_and_removes_adjacent_duplicates(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("DEBUG_DIRECTORY", str(tmp_path / "debug"))
+    monkeypatch.setattr("cineflow.internal.tools.debug_directory", lambda: tmp_path / "debug")
     tools = Tools()
     data = [
         {"title": "First", "year": 2024, "imdbid": 1},
@@ -228,3 +267,204 @@ def test_tools_export_creates_nested_directory_and_removes_adjacent_duplicates(t
 
     assert tools.data_import("nested/data.json") == data
     assert tools.remove_duplicates(data) == [data[0]]
+
+
+def test_library_export_directory_setting_and_its_environment_override(
+    tmp_path, monkeypatch, isolated_config_directory,
+) -> None:
+    isolated_config_directory.mkdir(parents=True, exist_ok=True)
+    (isolated_config_directory / "config.yaml").write_text(
+        f"library:\n  export_directory: {tmp_path / 'share'}\n", encoding="utf-8",
+    )
+
+    assert Library(config={"directory": "movie"})._handler.path == tmp_path / "share" / "movie"
+    monkeypatch.setenv("EXPORT_DIRECTORY", str(tmp_path / "env"))
+    assert Library(config={"directory": "movie"})._handler.path == tmp_path / "env" / "movie"
+
+
+def test_library_defaults_to_the_application_root(tmp_path) -> None:
+    assert Library(config={"directory": "tv"})._handler.path == tmp_path / "home" / "cineflow" / "library" / "tv"
+
+
+ITEMS = [
+    {"title": "Dune", "year": "2024", "torrent": "Dune.2024.2160p.HUN.x265", "seeders": 40, "size": 12.5},
+    {"title": "Alien", "year": 1979, "torrent": "Alien.1979.1080p.x264", "seeders": 5},
+    {"title": "Untitled"},
+]
+
+
+def titles(items) -> list:
+    return [item["title"] for item in items]
+
+
+def cond(field: str, value, match: str | None = None) -> dict:
+    return {"field": field, "value": value, **({"match": match} if match else {})}
+
+
+def where(*conditions, **options) -> dict:
+    return {"conditions": list(conditions), **options}
+
+
+def test_tools_filter_keeps_items_whose_field_contains_the_value() -> None:
+    hungarian = cond("torrent", "hun", "contains")
+
+    assert titles(Tools().filter_items(ITEMS, where(hungarian))) == ["Dune"]
+    assert titles(Tools().filter_items(ITEMS, where(hungarian, matching="drop"))) == ["Alien", "Untitled"]
+    assert titles(Tools().filter_items(ITEMS, where(hungarian, matching="keep"))) == ["Dune"]
+
+
+def test_tools_filter_at_least_and_at_most_compare_numbers() -> None:
+    tools = Tools()
+
+    assert titles(tools.filter_items(ITEMS, where(cond("seeders", "10", "at_least")))) == ["Dune"]
+    assert titles(tools.filter_items(ITEMS, where(cond("seeders", "10", "at_most")))) == ["Alien"]
+    assert titles(tools.filter_items(ITEMS, where(cond("seeders", 40, "at_most")))) == ["Dune", "Alien"]
+    assert titles(tools.filter_items(ITEMS, where(cond("year", "2000", "at_least")))) == ["Dune"]
+    assert titles(tools.filter_items(ITEMS, where(cond("title", "5", "at_least")))) == []
+    assert titles(tools.filter_items(ITEMS, where(cond("seeders", "10", "at_least"), matching="drop"))) == [
+        "Alien", "Untitled"]
+    assert tools.filter_items(ITEMS, where(cond("seeders", "10", "between"))) == ITEMS
+
+
+def test_tools_filter_equals_compares_numbers_by_value_and_text_without_case() -> None:
+    tools = Tools()
+
+    assert titles(tools.filter_items(ITEMS, where(cond("year", "1979")))) == ["Alien"]
+    assert titles(tools.filter_items(ITEMS, where(cond("size", "12.50", "equals")))) == ["Dune"]
+    assert titles(tools.filter_items(ITEMS, where(cond("title", "DUNE")))) == ["Dune"]
+    assert titles(tools.filter_items(ITEMS, where(cond("title", "Dun")))) == []
+    assert titles(tools.filter_items([{"title": "A", "kind": ["tv", "movie"]}],
+                                     where(cond("kind", "tv", "contains")))) == ["A"]
+
+
+def test_tools_filter_has_word_matches_whole_words_without_case() -> None:
+    releases = [
+        {"title": "A", "torrent": "Film.2024.1080p.HUN-GRP"},
+        {"title": "B", "torrent": "Film_2024 [hun] x264"},
+        {"title": "C", "torrent": "Hungry.Film.2024.1080p"},
+        {"title": "D", "torrent": "Film.2024.HUNSUB"},
+    ]
+
+    assert titles(Tools().filter_items(releases, where(cond("torrent", "HUN", "has_word")))) == ["A", "B"]
+    assert titles(Tools().filter_items(releases, where(cond("torrent", "hun", "contains")))) == ["A", "B", "C", "D"]
+
+
+def test_tools_filter_combines_conditions_with_and_or_or() -> None:
+    releases = [
+        {"title": "A", "torrent": "A.2160p.HDR.x265", "seeders": 50},
+        {"title": "B", "torrent": "B.2160p.DV.Dolby.Vision", "seeders": 45},
+        {"title": "C", "torrent": "C.1080p.HDR.x264", "seeders": 3},
+        {"title": "D", "torrent": "D.1080p.x264", "seeders": 90},
+    ]
+    hdr, dolby = cond("torrent", "HDR", "contains"), cond("torrent", "dolby", "contains")
+    seeded = cond("seeders", 40, "at_least")
+    tools = Tools()
+
+    assert titles(tools.filter_items(releases, where(hdr, seeded))) == ["A"]
+    assert titles(tools.filter_items(releases, where(hdr, seeded, combine="all"))) == ["A"]
+    assert titles(tools.filter_items(releases, where(hdr, dolby, combine="any"))) == ["A", "B", "C"]
+    assert titles(tools.filter_items(releases, where(hdr, dolby, combine="any", matching="drop"))) == ["D"]
+    assert titles(tools.filter_items(releases, where(hdr, seeded, matching="drop"))) == ["B", "C", "D"]
+
+
+def test_tools_filter_without_usable_conditions_keeps_every_item() -> None:
+    tools = Tools()
+
+    assert tools.filter_items(ITEMS, where({"field": "title"})) == ITEMS
+    assert tools.filter_items(ITEMS, where(cond("title", "Dune"), {"value": "x"})) == ITEMS
+    assert tools.filter_items(ITEMS, {"conditions": "title"}) == ITEMS
+    assert tools.filter_items(ITEMS, where()) == ITEMS
+    assert tools.filter_items(ITEMS, None) == ITEMS
+    assert tools.filter_items(None, where(cond("title", "x"))) == []
+
+
+def test_tools_filter_conditions_are_validated_item_by_item() -> None:
+    from cineflow.core.validation import validate_flow
+
+    def issues(conditions) -> list:
+        flow = {"name": "Filter", "steps": [
+            {"name": "Load", "module": "tools", "action": "data_import"},
+            {"name": "F", "module": "tools", "action": "filter_items",
+             "input": {"data": "previous", "query": {"conditions": conditions, "combine": "any"}}},
+        ]}
+        return [(".".join(map(str, issue.path)), issue.code) for issue in validate_flow(flow) if issue.level == "error"]
+
+    assert issues([cond("torrent", "HDR", "contains"), cond("seeders", 40, "at_least")]) == []
+    assert issues([{"field": "nope", "match": "between"}]) == [
+        ("steps.1.input.query.conditions.0.field", "choice"),
+        ("steps.1.input.query.conditions.0.match", "choice"),
+        ("steps.1.input.query.conditions.0.value", "required"),
+    ]
+    assert issues(["torrent"]) == [("steps.1.input.query.conditions.0", "type")]
+
+
+def test_tools_filter_runs_as_a_valid_flow_step_on_the_previous_items(tmp_path, monkeypatch) -> None:
+    from cineflow.core import preview
+    from cineflow.core.validation import validate_flow
+
+    flow = {"name": "Filter", "enabled": False, "steps": [
+        {"name": "Load", "module": "tools", "action": "data_import", "input": {"filename": "items.json"}},
+        {"name": "Hungarian", "module": "tools", "action": "filter_items",
+         "input": {"data": "previous",
+                   "query": where(cond("torrent", "HUN", "contains"), cond("seeders", 10, "at_least"))}},
+    ]}
+    assert [issue for issue in validate_flow(flow) if issue.level == "error"] == []
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    (debug / "items.json").write_text(json.dumps(ITEMS))
+    monkeypatch.setattr("cineflow.internal.tools.debug_directory", lambda: debug)
+
+    result = preview.run_test(flow)
+
+    assert result["status"] == "success"
+    assert [(step["name"], step["count"]) for step in result["steps"]] == [("Load", 3), ("Hungarian", 1)]
+
+
+def test_library_enrich_adds_stored_data_by_identity_then_title() -> None:
+    """Items get the stored data of the matching library item; their own values win."""
+    handler = FakeHandler()
+    handler.items = {
+        "Film (2024) [tmdbid-7]": {"title": "Film", "year": 2024, "tmdbid": 7, "torrent": "Film.2024.1080p",
+                                   "resolution": "1080p"},
+        "Other (2020)": {"title": "Other", "year": 2020, "imdbid": 99, "overview": "text"},
+        "Broken (2021)": {},
+        "odd-name": {"title": "Odd", "year": 2000},
+    }
+    instance = library(handler)
+    data = [
+        {"title": "Localized", "year": 2024, "tmdbid": 7, "resolution": "720p"},
+        {"title": "Other", "year": "2020"},
+        {"title": "Unknown", "alttitle": "other", "year": 2020},
+        {"title": "Other", "year": 2019},
+        {"title": "Odd", "year": 2000},
+    ]
+
+    result = instance.enrich(data)
+
+    assert result == data
+    assert data[0] == {"title": "Localized", "year": 2024, "tmdbid": 7, "resolution": "720p",
+                       "torrent": "Film.2024.1080p", "directory": "Film (2024) [tmdbid-7]"}
+    assert data[1]["overview"] == "text" and data[1]["directory"] == "Other (2020)"
+    assert data[2]["directory"] == "Other (2020)"
+    assert "directory" not in data[3] and "directory" not in data[4]
+    assert instance.enrich(None) == []
+
+
+def test_library_enrich_must_match_drops_and_series_match_without_year() -> None:
+    """With must_match only found items go on; a series without a year matches by title."""
+    handler = FakeHandler()
+    handler.items = {"Show [tmdbid-3]": {"title": "Show", "tmdbid": 3, "season": 2}}
+    instance = library(handler)
+    instance.kind = "tv"
+    instance._cfg = {"must_match": True}
+
+    result = instance.enrich([{"title": "Show", "year": 2019}, {"title": "Missing"}])
+
+    assert result == [{"title": "Show", "year": 2019, "tmdbid": 3, "season": 2, "directory": "Show [tmdbid-3]"}]
+
+
+def test_library_enrich_is_offered_as_data_source() -> None:
+    """The flow editor offers the library under "Add data from" of a source step."""
+    action = catalog.definition("library").action("enrich")
+    assert action.effective_stage == "enrich"
+    assert [spec.key for spec in action.fields] == ["must_match"]

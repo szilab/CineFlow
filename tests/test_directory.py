@@ -22,12 +22,12 @@ def test_root_relative_and_nested_directories_are_allowed(tmp_path: Path, monkey
 
 @pytest.mark.parametrize("name", ["../outside", "../../something"])
 def test_parent_directory_traversal_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
-    with pytest.raises(ValueError, match="inside EXPORT_DIRECTORY"):
+    with pytest.raises(ValueError, match="inside the export directory"):
         handler(tmp_path, monkeypatch, name)
 
 
 def test_external_absolute_directory_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(ValueError, match="inside EXPORT_DIRECTORY"):
+    with pytest.raises(ValueError, match="inside the export directory"):
         handler(tmp_path, monkeypatch, str(tmp_path.parent / "outside"))
 
 
@@ -177,18 +177,8 @@ def test_cleaner_survives_cleanup_errors(tmp_path: Path, monkeypatch: pytest.Mon
     cleaner.worker()
 
 
-@pytest.mark.parametrize("with_sample", [True, False])
-def test_published_video_carries_the_publish_time_not_the_sample_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_sample: bool,
-) -> None:
+def test_published_video_carries_the_publish_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Jellyfin sorts "Date added" by the video timestamps, so each publish must stamp its own time."""
-    media_dir = tmp_path / "media"
-    media_dir.mkdir()
-    sample = media_dir / "sample.1080p.mp4"
-    sample.write_bytes(b"video")
-    old = 1_600_000_000
-    os.utime(sample, (old, old))
-    monkeypatch.setenv("MEDIA_DIRECTORY", str(media_dir if with_sample else tmp_path / "missing"))
     library = handler(tmp_path / "export", monkeypatch)
     item = "Film (2026) [tmdbid-7]"
     before = time.time() - 1
@@ -198,14 +188,22 @@ def test_published_video_carries_the_publish_time_not_the_sample_time(
     assert (library._path / item / "Film.mkv").stat().st_mtime >= before
 
 
+def test_published_video_describes_the_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The video file is a small Matroska header built from the release name, not a copied sample."""
+    library = handler(tmp_path / "export", monkeypatch)
+    item = "Film (2026) [tmdbid-7]"
+    media = {"title": "Film", "year": 2026, "torrent": "Film.2026.2160p.WEB-DL.DDP5.1.HDR.H.265-GRP"}
+
+    assert library.publish(item=item, media=media, resolution="2160p")
+
+    video = (library._path / item / "Film.mkv").read_bytes()
+    assert video.startswith(bytes.fromhex("1a45dfa3"))
+    assert len(video) < 1024
+    assert b"V_MPEGH/ISO/HEVC" in video and b"A_EAC3" in video
+
+
 def test_upgraded_release_gets_a_newer_video_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Replacing an item changes the video mtime, which makes Jellyfin re-read "Date added"."""
-    media_dir = tmp_path / "media"
-    media_dir.mkdir()
-    sample = media_dir / "sample.1080p.mp4"
-    sample.write_bytes(b"video")
-    os.utime(sample, (1_500_000_000, 1_500_000_000))
-    monkeypatch.setenv("MEDIA_DIRECTORY", str(media_dir))
     library = handler(tmp_path / "export", monkeypatch)
     item = "Film (2026) [tmdbid-7]"
     media = {"title": "Film", "year": 2026}

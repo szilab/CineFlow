@@ -6,10 +6,13 @@ from typing import List, Dict, Any
 import requests
 from cineflow.core.bases.module import TorrentClientBase
 from cineflow.core.schema import (
-    ModuleDefinition, ActionDefinition, Field, INPUT_DATA, INPUT_QUERY, consumer_actions,
+    ModuleDefinition, ActionDefinition, Field, LIMIT, INPUT_DATA, INPUT_QUERY, RENAME_FOLDERS,
+    DELETE_TORRENTS, MOVE_TORRENTS, TORRENT_QUERY,
+    consumer_actions,
 )
 from cineflow.core.logger import log
 from cineflow.utils.misc import release_parsers
+from cineflow.utils.torrent import join_path
 
 
 class Transmission(TorrentClientBase):
@@ -34,13 +37,17 @@ class Transmission(TorrentClientBase):
             Field('directory', 'string', 'Download directory',
                   "Download directory on the client's machine.", step=True),
             Field('rpc_path', 'string', 'RPC path', default='transmission/rpc', advanced=True),
+            LIMIT,
         ),
         actions=(
             ActionDefinition('get', 'Get torrents', "List the torrents of the client.",
-                             input=INPUT_QUERY, retrieval=True),
+                             input=INPUT_QUERY, query=TORRENT_QUERY, retrieval=True),
             ActionDefinition('put', 'Add torrents', "Add the item release links to the client.",
                              input=INPUT_DATA, side_effects=True),
-            *consumer_actions('Transmission')[1:4],
+            RENAME_FOLDERS,
+            MOVE_TORRENTS,
+            DELETE_TORRENTS,
+            *consumer_actions('Transmission', query=TORRENT_QUERY)[1:4],
         ),
     )
 
@@ -53,17 +60,19 @@ class Transmission(TorrentClientBase):
         self._auth = (username, password) if username else None
         # the RPC session is opened on the first request, not at construction time
         self._session_id = None
-        release_mappings, release_transforms = release_parsers(kind=self._kind, source='name')
+        release_mappings, release_transforms = release_parsers(kind=self._kind, source='name', folder_names=True)
         self._data_mappings = {
             **release_mappings,
             'status': ['status'],
             'percent_done': ['percentDone'],
+            'torrent_hash': ['hashString'],
+            'added': ['addedDate'],
         }
         self._data_transforms = release_transforms
 
     def get(self, query: Any = None) -> List[Dict] | None:
         """Get torrents from the Transmission API."""
-        fields = ['id', 'name', 'status', 'percentDone', 'totalSize']
+        fields = ['id', 'name', 'status', 'percentDone', 'totalSize', 'hashString', 'addedDate']
         data = self._rpc_request(method='torrent-get', params={'fields': fields})
         if data is None:
             log("Failed to retrieve torrents from Transmission API.", level='ERROR')
@@ -73,7 +82,7 @@ class Transmission(TorrentClientBase):
         else:
             log("No torrents found or invalid response from Transmission API.", level='WARNING')
             return []
-        return self._map_torrents(items=data, query=query)
+        return self._map_torrents(items=data, query=query)[:self._limit]
 
     def put(self, data: List[Dict]) -> List[Dict]:
         """Add torrent to the download list."""
@@ -151,6 +160,9 @@ class Transmission(TorrentClientBase):
     def _handle_response(self, media: dict, response: dict | None) -> None:
         """Handle the response from the Transmission API."""
         response = response or {}
+        torrent = response.get('torrent-added') or response.get('torrent-duplicate')
+        if isinstance(torrent, dict) and torrent.get('hashString'):
+            media['torrent_hash'] = torrent['hashString']
         if response.get('torrent-duplicate'):
             log(f"Torrent '{media.get('title')}' already exists in Transmission.")
             media['transmission_status'] = 'duplicate'
@@ -160,6 +172,46 @@ class Transmission(TorrentClientBase):
         else:
             log(f"Failed to add torrent '{media.get('title')}': {response.get('result')}", level='ERROR')
             media['transmission_status'] = 'error'
+
+    def _torrent_state(self, torrent_hash: str) -> dict | None:
+        """Return the id, download directory and file names of a torrent."""
+        data = self._rpc_request(
+            method='torrent-get', params={'ids': [torrent_hash], 'fields': ['id', 'downloadDir', 'files']}
+        )
+        torrents = (data or {}).get('torrents')
+        if not torrents or not isinstance(torrents[0], dict):
+            return None
+        torrent = torrents[0]
+        return {
+            'id': torrent.get('id'),
+            'directory': torrent.get('downloadDir') or '',
+            'files': [item.get('name') for item in torrent.get('files') or [] if isinstance(item, dict)],
+        }
+
+    def _torrent_locations(self) -> list[tuple[str, str]] | None:
+        """Return the download directory and content path of every torrent."""
+        data = self._rpc_request(method='torrent-get', params={'fields': ['name', 'downloadDir']})
+        if data is None:
+            return None
+        return [
+            (item.get('downloadDir') or '', join_path(item.get('downloadDir') or '', item.get('name') or ''))
+            for item in data.get('torrents') or [] if isinstance(item, dict)
+        ]
+
+    def _rename_root(self, state: dict, root: str, target: str) -> bool:
+        """Rename the root folder; Transmission renames the torrent with it."""
+        params = {'ids': [state['id']], 'path': root, 'name': target}
+        return self._rpc_request(method='torrent-rename-path', params=params) is not None
+
+    def _remove_torrent(self, state: dict, delete_files: bool) -> bool:
+        """Remove the torrent, with its data when ``delete_files``."""
+        params = {'ids': [state['id']], 'delete-local-data': delete_files}
+        return self._rpc_request(method='torrent-remove', params=params) is not None
+
+    def _move_content(self, state: dict, location: str) -> bool:
+        """Move the torrent data into ``location``."""
+        params = {'ids': [state['id']], 'location': location, 'move': True}
+        return self._rpc_request(method='torrent-set-location', params=params) is not None
 
     def _rpc_request(self, method: str, params: dict = None) -> dict | None:
         """Make a request to the Transmission RPC API."""

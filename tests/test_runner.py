@@ -48,7 +48,7 @@ class FakeFlow:
 def manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> runner.FlowManager:
     """Create a manager with thread creation disabled."""
     FakeFlow.instances = []
-    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(runner, "config_directory", lambda: tmp_path)
     monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
     monkeypatch.setattr(runner, "Flow", FakeFlow)
     monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: "parallel")
@@ -234,7 +234,7 @@ def test_invalid_yaml_reload_stops_the_previous_flow(
         yaml.safe_dump({"steps": [{"module": "fake", "action": "get"}]}),
         encoding="utf-8"
     )
-    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(runner, "config_directory", lambda: tmp_path)
     monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
     monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: "parallel")
     start, stop = Mock(), Mock()
@@ -264,7 +264,7 @@ def test_execution_mode_is_deterministic(
     FakeFlow.instances = []
     flow_file = tmp_path / "flow.yaml"
     flow_file.write_text("valid", encoding="utf-8")
-    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(runner, "config_directory", lambda: tmp_path)
     monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
     monkeypatch.setattr(runner, "Flow", FakeFlow)
     monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: configured)
@@ -284,7 +284,7 @@ def test_sequential_manager_skips_disabled_flow(
     FakeFlow.instances = []
     flow_file = tmp_path / "flow.yaml"
     flow_file.write_text(yaml.safe_dump({"enabled": False}), encoding="utf-8")
-    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(runner, "config_directory", lambda: tmp_path)
     monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
     monkeypatch.setattr(runner, "Flow", FakeFlow)
     monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: "sequential")
@@ -302,7 +302,7 @@ def test_sequential_manager_respects_due_times_priority_and_reload(
     clock = Mock(return_value=100.0)
     execution_order = []
     monkeypatch.setattr(runner.time, "monotonic", clock)
-    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(runner, "config_directory", lambda: tmp_path)
     monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
     monkeypatch.setattr(runner, "Flow", FakeFlow)
     monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: "sequential")
@@ -347,7 +347,7 @@ def test_sequential_manager_respects_due_times_priority_and_reload(
 def test_refresh_delay_reads_its_environment_variable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("CFG_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(runner, "config_directory", lambda: tmp_path)
     monkeypatch.setenv("FM_REFRESH_SEQ", "15")
     monkeypatch.setattr(runner.FlowManager, "start", lambda self: None)
     monkeypatch.setattr(runner, "cfg", lambda *args, **kwargs: "parallel")
@@ -517,6 +517,77 @@ def test_flow_media_kind_defaults_to_movie_and_wins_over_a_step_kind(
 
     assert flow.kind == "movie" and flow.valid
     assert flow._load_module(step=flow.steps[0]).config["kind"] == "movie"
+
+
+class FilterModule:
+    """Module whose filter takes items and an optional query, like ``unique``."""
+
+    def __init__(self, config: dict) -> None:
+        self.config = config
+
+    def get(self) -> list:
+        return [{"title": "A"}, {"title": "B"}]
+
+    def unique(self, data: list, query=None) -> list:
+        return [item for item in data if item["title"] != (query or {}).get("drop", "A")]
+
+
+def test_filter_with_only_items_as_input_gets_them_as_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(runner, "load_module", lambda name: FilterModule)
+    flow = runner.Flow(str(tmp_path / "filter.yaml"), definition={"steps": [
+        {"name": "a", "module": "jellyfin", "action": "get"},
+        {"name": "b", "module": "jellyfin", "action": "unique", "input": "previous"},
+        {"name": "c", "module": "jellyfin", "action": "unique",
+         "input": {"data": "{{a}}", "query": {"drop": "B"}}},
+    ]})
+
+    assert flow.execute() == "success"
+    assert flow._outputs["b"] == [{"title": "B"}]
+    assert flow._outputs["c"] == [{"title": "A"}]
+
+
+def test_flow_of_both_kinds_runs_one_pass_per_kind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(runner, "load_module", lambda name: ActionModule)
+    monkeypatch.setattr(runner, "cfg", lambda key: {})
+    seen = []
+    original = runner.Flow._load_module
+
+    def load(self, step):
+        module = original(self, step)
+        seen.append((module.config["kind"], module.config.get("directory")))
+        return module
+
+    monkeypatch.setattr(runner.Flow, "_load_module", load)
+    ActionModule.calls = []
+    ActionModule.fail = False
+    flow = runner.Flow(str(tmp_path / "both.yaml"), definition={"kind": "both", "steps": [
+        {"name": "a", "module": "library", "action": "get"}]})
+
+    assert flow.valid and flow.kind == "both" and flow.run_kind == "movie"
+    assert flow.execute() == "success"
+    # one pass per kind; the default library folder follows the kind of the pass
+    assert seen == [("movie", "movie"), ("tv", "tv")]
+    assert ActionModule.calls == [("get", None), ("get", None)]
+    assert flow.run_kind == "movie"
+
+
+def test_failed_pass_of_a_both_kinds_flow_does_not_stop_the_other(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(runner, "load_module", lambda name: ActionModule)
+    ActionModule.calls = []
+    ActionModule.fail = True
+    flow = runner.Flow(str(tmp_path / "both.yaml"), definition={"kind": "both", "steps": [
+        {"name": "a", "module": "tmdb", "action": "get"}]})
+    try:
+        assert flow.execute() == "failed"
+    finally:
+        ActionModule.fail = False
+
+    assert len(ActionModule.calls) == 2
+    assert flow.state["last_error"].startswith("movie: ") and "; tv: " in flow.state["last_error"]
 
 
 def test_flow_with_invalid_media_kind_does_not_run(tmp_path: Path) -> None:

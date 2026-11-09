@@ -4,7 +4,7 @@ from typing import List
 from cineflow.core.logger import log
 from cineflow.core.bases.module import MediaServerBase
 from cineflow.core.schema import (
-    ModuleDefinition, Field, MEDIA_SERVER_QUERY, consumer_actions,
+    ModuleDefinition, Field, LIMIT, MEDIA_SERVER_QUERY, consumer_actions,
 )
 from cineflow.utils.misc import fix_imdbid
 
@@ -31,6 +31,7 @@ class Plex(MediaServerBase):
         fields=(
             Field('url', 'url', 'URL', "Plex base URL, e.g. http://plex:32400.", required=True),
             Field('token', 'secret', 'Token', "Plex authentication token.", required=True),
+            LIMIT,
             Field('ignore.libraries', 'list', 'Ignored libraries', "Library names left out of queries.",
                   advanced=True),
         ),

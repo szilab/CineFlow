@@ -8,7 +8,9 @@ frontend only renders the definitions and issues returned here.
 
 import copy
 import hashlib
+import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
@@ -19,9 +21,19 @@ from cineflow.core import catalog, preview, store, validation
 from cineflow.core.config import Config
 from cineflow.core.logger import log, recent_logs
 from cineflow.core.schema import FLOW_SETTINGS, has_errors
-from cineflow.runtime import export_directory
+from cineflow.runtime import application_root, export_directory
 
 INSTANCE_ID = validation.INSTANCE_ID
+
+
+# how long a dropdown list read from a service is reused, in seconds
+CHOICES_TTL = 300
+
+
+def _library_root(config: dict) -> str | None:
+    """Return the export directory the library module defaults set."""
+    library = config.get('library') if isinstance(config, dict) else None
+    return library.get('export_directory') if isinstance(library, dict) else None
 
 
 class ApiError(Exception):
@@ -49,6 +61,8 @@ class Api:
     def __init__(self, flow_manager=None) -> None:
         self._manager = flow_manager
         self._tests: dict[str, dict] = {}
+        # values of dropdown fields read from the services: {(instance, source): (time, values)}
+        self._choices: dict[tuple[str, str], tuple[float, list]] = {}
         self._routes: list[tuple[str, re.Pattern, Callable]] = []
         for method, pattern, handler in (
             ('GET', r'/api/health', self.health),
@@ -61,11 +75,13 @@ class Api:
             ('DELETE', r'/api/instances/(?P<instance_id>[^/]+)', self.delete_instance),
             ('POST', r'/api/instances/(?P<instance_id>[^/]+)/validate', self.validate_instance),
             ('POST', r'/api/instances/(?P<instance_id>[^/]+)/test', self.test_instance),
+            ('GET', r'/api/instances/(?P<instance_id>[^/]+)/choices/(?P<source>[a-z_]+)', self.instance_choices),
             ('GET', r'/api/flows', self.list_flows),
             ('POST', r'/api/flows', self.create_flow),
             ('POST', r'/api/flows/validate', self.validate_flow),
             ('POST', r'/api/flows/import', self.import_flow),
             ('POST', r'/api/flows/test', self.test_flow),
+            ('GET', r'/api/flows/test/(?P<test_id>[0-9a-f]{32})/(?P<position>\d+)/(?P<page>\d+)', self.test_page),
             ('GET', r'/api/flows/(?P<flow_id>[^/]+)', self.get_flow),
             ('PUT', r'/api/flows/(?P<flow_id>[^/]+)', self.update_flow),
             ('DELETE', r'/api/flows/(?P<flow_id>[^/]+)', self.delete_flow),
@@ -137,6 +153,13 @@ class Api:
             name = (named or {}).get('name') or instance_id
         masked, secrets = store.mask(module_id, own)
         issues = validation.validate_instance(config, instance_id)
+        # settings an environment variable overrides are read-only in the GUI
+        environment = {
+            spec.key: {'name': spec.environment_name(module_id),
+                       'value': None if spec.type == 'secret' else os.environ[spec.environment_name(module_id)]}
+            for spec in (definition.fields if definition else ())
+            if spec.environment_name(module_id) in os.environ
+        }
         return {
             'id': instance_id,
             'module': module_id,
@@ -144,6 +167,7 @@ class Api:
             'default': is_default,
             'config': masked,
             'secrets': secrets,
+            'environment': environment,
             'status': validation.status_of(issues),
             'issues': _issues(issues),
             'test': self._tests.get(instance_id),
@@ -232,7 +256,8 @@ class Api:
                  'modules': list(setting.modules), 'kind_default': setting.kind_default}
                 for key, setting in FLOW_SETTINGS.items()
             ],
-            'export_directory': str(export_directory()),
+            'export_directory': str(export_directory(_library_root(self._config()))),
+            'default_export_directory': str(application_root() / 'library'),
         }
 
     def list_instances(self, body=None) -> dict:  # pylint: disable=unused-argument
@@ -285,6 +310,7 @@ class Api:
         if validation.status_of(issues) == validation.STATUS_INVALID:
             raise ApiError(422, 'The settings are invalid.', issues)
         self._tests.pop(instance_id, None)
+        self._choices = {key: value for key, value in self._choices.items() if key[0] != instance_id}
         self._save_config(config)
         return self._instance_summary(config, instance_id)
 
@@ -323,6 +349,33 @@ class Api:
                 result = {'ok': False, 'message': str(exc)}
         self._tests[instance_id] = result
         return result
+
+    def instance_choices(self, instance_id: str, source: str, body=None) -> dict:  # pylint: disable=unused-argument
+        """Return the valid values of a dropdown field, read from the instance's service."""
+        config = self._config()
+        self._require_instance(config, instance_id)
+        module_id = instance_id if instance_id in catalog.module_ids() \
+            else config['instances'][instance_id]['module']
+        definition = catalog.definition(module_id)
+        specs = [*definition.fields, *(spec for action in definition.actions
+                                       for spec in (*action.query, *action.fields, *action.arguments))]
+        if source not in {spec.choices for spec in specs if spec.choices}:
+            raise ApiError(404, f"The module has no '{source}' list.")
+        if has_errors(validation.validate_instance(config, instance_id)):
+            raise ApiError(409, 'Set up the module first.')
+        cached = self._choices.get((instance_id, source))
+        if cached and time.monotonic() - cached[0] < CHOICES_TTL:
+            return {'choices': cached[1]}
+        try:
+            module = catalog.module_class(module_id)(config=validation.instance_config(config, instance_id))
+            values = module.field_choices(source)
+        except Exception as exc:  # pylint: disable=broad-except
+            raise ApiError(502, f'Could not load the list: {exc}') from exc
+        if values is None:
+            raise ApiError(404, f"The module has no '{source}' list.")
+        values = [str(value) for value in values]
+        self._choices[(instance_id, source)] = (time.monotonic(), values)
+        return {'choices': values}
 
     def test_instance(self, instance_id: str, body=None) -> dict:
         """Run the module connection test with unsaved or saved settings."""
@@ -451,6 +504,13 @@ class Api:
         result = preview.run_test({**flow, 'steps': steps, 'enabled': True})
         if result is None:
             raise ApiError(429, 'Other tests are running. Try again shortly.')
+        return result
+
+    def test_page(self, test_id: str, position: str, page: str, body=None) -> dict:  # pylint: disable=unused-argument
+        """Return one page of the items of a step result of a recent test run."""
+        result = preview.result_page(test_id, int(position), int(page))
+        if result is None:
+            raise ApiError(404, 'This test result is no longer kept. Run the test again.')
         return result
 
     def import_flow(self, body=None) -> tuple[int, dict]:

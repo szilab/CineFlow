@@ -20,6 +20,8 @@ def jellyfin() -> Jellyfin:
     client._user_list = {}
     client._library_list = {}
     client._kind = 'movie'
+    client._cfg = {}
+    client.name = 'jellyfin'
     client.map = Mock(side_effect=lambda item: item)
     return client
 
@@ -235,3 +237,63 @@ def test_items_without_tmdb_id_are_kept_for_set_operations() -> None:
 def test_inverse_and_per_user_cannot_be_combined() -> None:
     with pytest.raises(ValueError, match="perUser"):
         jellyfin()._parse_query({"isInverse": True, "perUser": True})
+
+
+def test_field_choices_list_libraries_and_users() -> None:
+    client = jellyfin()
+    client._library_list = {'Movies': 'a', 'Anime': 'b'}
+    client._user_list = {'zoe': '1', 'adam': '2'}
+
+    assert client.field_choices('libraries') == ['Anime', 'Movies']
+    assert client.field_choices('users') == ['adam', 'zoe']
+    assert client.field_choices('nothing') is None
+
+
+def test_field_choices_raise_on_service_failure() -> None:
+    client = jellyfin()
+    client._library_list = None
+    client._handler.get.return_value = response(500)
+
+    with pytest.raises(ValueError, match='Failed to query Jellyfin libraries'):
+        client.field_choices('libraries')
+
+
+def test_a_list_of_libraries_is_queried_one_by_one() -> None:
+    client = jellyfin()
+    client._library_list = {'Filmek': 'a', 'Trending Filmek': 'b', 'Sorozatok': 'c'}
+    client._get_items = Mock(side_effect=lambda query: [{'jellyfinid': query['ParentId'], 'title': query['ParentId']}])
+
+    items = client.get({'parentLibrary': ['Filmek', 'Sorozatok']})
+
+    assert [call.kwargs['query']['ParentId'] for call in client._get_items.call_args_list] == ['a', 'c']
+    assert [item['title'] for item in items] == ['a', 'c']
+    assert client._parse_query({'parentLibrary': 'Filmek'}) == {'ParentId': 'a'}
+
+
+def test_all_except_a_list_of_libraries_and_failures() -> None:
+    client = jellyfin()
+    client._library_list = {'Filmek': 'a', 'Trending Filmek': 'b', 'Trending Sorozatok': 'c'}
+    client._get_items = Mock(side_effect=lambda query: [{'jellyfinid': query['ParentId']}])
+    client._inverse_items = Mock(return_value=[{'jellyfinid': 'a'}])
+
+    assert client.get({'parentLibrary': ['Trending Filmek', 'Trending Sorozatok'], 'isInverse': True}) == [
+        {'jellyfinid': 'a'}]
+    assert client._inverse_items.call_args.kwargs['query_items'] == [{'jellyfinid': 'b'}, {'jellyfinid': 'c'}]
+
+    # one failed library fails the whole query; an unknown library stops the step
+    client._get_items = Mock(side_effect=[[{'jellyfinid': 'b'}], None])
+    assert client.get({'parentLibrary': ['Trending Filmek', 'Trending Sorozatok']}) is None
+    with pytest.raises(ValueError, match="Library 'Nope' not found"):
+        client.get({'parentLibrary': ['Filmek', 'Nope']})
+
+
+def test_get_is_limited_but_filters_compare_with_every_item() -> None:
+    client = jellyfin()
+    client._limit = 2
+    on_server = [{'jellyfinid': str(n), 'title': f'T{n}', 'year': '2020'} for n in range(3)]
+    client._get_items = Mock(return_value=on_server)
+
+    assert len(client.get({})) == 2
+    # the third item on the server still counts as "already in Jellyfin"
+    assert client.unique([{'title': 'T2', 'year': '2020'}, {'title': 'New', 'year': '2021'}], {}) == [
+        {'title': 'New', 'year': '2021'}]

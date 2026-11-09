@@ -14,7 +14,7 @@ from cineflow.core.config import cfg
 from cineflow.core.bases.module import ModuleBase, _merge_config
 from cineflow.core.bases.worker import WorkerBase
 from cineflow.core.logger import log, log_context
-from cineflow.core.schema import DEFAULT_MEDIA_KIND, FLOW_SETTINGS, flow_media_kind, validate_value
+from cineflow.core.schema import DEFAULT_MEDIA_KIND, FLOW_SETTINGS, flow_media_kind, run_kinds, validate_value
 from cineflow.utils.misc import load_module
 from cineflow.runtime import config_directory
 
@@ -197,6 +197,8 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         self.priority = 99
         self.delay = 60
         self.kind = DEFAULT_MEDIA_KIND
+        # media kind of the pass in progress; a flow of kind 'both' runs one pass per kind
+        self.run_kind = DEFAULT_MEDIA_KIND
         self.enabled = True
         self._enabled_valid = True
         self._kind_valid = True
@@ -272,8 +274,32 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
         """Drop cached module instances; the next step builds them from fresh settings."""
         self._mod_cache = {}
 
-    def _execute_steps(self) -> tuple[str, str | None]:  # noqa: C901
-        """Run the steps once and return the status and an error message."""
+    def _execute_steps(self) -> tuple[str, str | None]:
+        """Run the steps once per media kind of the flow; return the status and an error message.
+
+        The passes of a flow of kind 'both' are independent: a failed movie pass
+        does not stop the TV pass, but the run is reported as failed.
+        """
+        kinds = run_kinds(self.kind)
+        failures = []
+        try:
+            for kind in kinds:
+                self.run_kind = kind
+                if len(kinds) > 1:
+                    log(f"Flow '{self.name}' runs for media kind '{kind}'.", level="INFO")
+                status, message = self._execute_pass()
+                if status == 'stopped':
+                    return status, message
+                if status != 'success':
+                    failures.append(f"{kind}: {message}" if len(kinds) > 1 else message)
+        finally:
+            self.run_kind = kinds[0]
+        if failures:
+            return 'failed', '; '.join(failures)
+        return 'success', None
+
+    def _execute_pass(self) -> tuple[str, str | None]:  # noqa: C901
+        """Run the steps once for ``run_kind`` and return the status and an error message."""
         self._outputs = {}
         log(f"Flow '{self.name}' from file '{self._filename}' started.", level="INFO")
         for step in self.steps:
@@ -320,7 +346,7 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
             if flow_key in self.settings:
                 values[setting.module_key] = copy.deepcopy(self.settings[flow_key])
             elif setting.kind_default:
-                values[setting.module_key] = self.kind
+                values[setting.module_key] = self.run_kind
             else:
                 values[setting.module_key] = copy.deepcopy(setting.field.default)
         return values
@@ -338,7 +364,7 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
             # module defaults < instance settings < step settings
             config = _merge_config(instance.get('config') or {}, config)
         # every module handles the media kind of the flow
-        config = _merge_config(config, {'kind': self.kind})
+        config = _merge_config(config, {'kind': self.run_kind})
         config = _merge_config(config, self._module_settings(name))
         # Use a hash of the config to reuse instances with identical settings
         cache_key = f"{name}_{instance_id}_{hash(str(config))}"
@@ -426,7 +452,10 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
             elif isinstance(inp, list):
                 return action(inp)
             return action(inp)
-        return action(**inp)
+        if isinstance(inp, dict):
+            return action(**inp)
+        # only items (e.g. ``input: previous``): they are the first argument, the rest keep their defaults
+        return action(inp)
 
     def _parse_file(self) -> None:
         if self._definition is not None:
@@ -448,9 +477,10 @@ class Flow(WorkerBase):  # pylint: disable=too-few-public-methods,too-many-insta
             kind = flow_media_kind(data)
             if kind is None:
                 self._kind_valid = False
-                log(f"Invalid media kind in '{self._filename}': expected movie or tv.", level="WARNING")
+                log(f"Invalid media kind in '{self._filename}': expected movie, tv or both.", level="WARNING")
             else:
                 self.kind = kind
+                self.run_kind = run_kinds(kind)[0]
             self._apply_settings(data)
             enabled = data.get("enabled", True)
             if isinstance(enabled, bool):

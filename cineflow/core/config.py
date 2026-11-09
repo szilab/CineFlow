@@ -110,8 +110,12 @@ class Config(metaclass=SingletonMeta):
             log(f"Error saving config file '{os.path.basename(self._file)}': {e}", level="ERROR")
 
     @staticmethod
-    def getfrom(config: dict, key: str, module: str = None, default: Any = None) -> Any:
-        """Get a value from a given config dictionary"""
+    def getfrom(config: dict, key: str, module: str = None, default: Any = None, environment: str = None) -> Any:
+        """Get a value from a given config dictionary.
+
+        An environment variable overrides the value: ``environment`` when given,
+        else ``<MODULE>_<KEY>`` for a module.
+        """
         value = config.get(key) if key in config else None
         if key not in config:
             value = config
@@ -122,7 +126,7 @@ class Config(metaclass=SingletonMeta):
                     value = None
                     break
         hint = value if value is not None else default
-        environment_key = f"{module}_{key}".upper() if module else None
+        environment_key = environment or (f"{module}_{key}".upper() if module else None)
         if environment_key and environment_key in os.environ:
             return Config._convert_environment(os.environ[environment_key], hint, environment_key)
         if value is None and default is not None:

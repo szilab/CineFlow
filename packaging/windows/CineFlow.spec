@@ -7,18 +7,13 @@ from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 
 PROJECT_ROOT = Path(SPECPATH).parents[1]
-EXAMPLES = PROJECT_ROOT / "docker" / "examples"
 
 datas = copy_metadata("cineflow")
 datas += [(str(PROJECT_ROOT / "VERSION"), ".")]
-datas += [
-    (str(EXAMPLES / filename), "examples")
-    for filename in ("config.yaml", "from_lib.yaml", "to_lib.yaml")
-]
-
+# the web GUI files keep their place in the package
 datas += [
     (str(path), str(path.parent.relative_to(PROJECT_ROOT)))
-    for path in (PROJECT_ROOT / "cineflow" / "web" / "static").iterdir()
+    for path in PROJECT_ROOT.joinpath("cineflow", "web", "static").iterdir()
     if path.is_file()
 ]
 

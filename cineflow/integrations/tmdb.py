@@ -86,16 +86,45 @@ class Tmdb(ConsumerBase):
         """Search for media in TMDB."""
         if media.get('tmdbid'):
             if match := self.match(results=self._search_w_tmdbid(tmdbid=media['tmdbid']), media=media):
-                return self._with_imdbid(match)
+                return self._with_seasons(self._with_imdbid(match))
         elif media.get('imdbid'):
             if match := self.match(results=self._search_w_imdbid(imdbid=media['imdbid']), media=media):
-                return self._with_imdbid(match)
+                return self._with_seasons(self._with_imdbid(match))
         for titlekey in ('title', 'alttitle'):
             if titlekey == 'alttitle' and media.get('alttitle') == media.get('title'):
                 break
             if match := self.match(results=self._search_w_title(media=media, titlekey=titlekey), media=media):
-                return self._with_imdbid(match)
+                return self._with_seasons(self._with_imdbid(match))
         return None
+
+    def _with_seasons(self, media: dict) -> dict:
+        """Add the aired episode count of each season of a series (``seasons_aired``)."""
+        if self.kind != 'tv' or not media.get('tmdbid'):
+            return media
+        response = self._handler.get(endpoint=f"/tv/{media['tmdbid']}")
+        if aired := self.aired_seasons(response.data):
+            media['seasons_aired'] = aired
+        return media
+
+    @staticmethod
+    def aired_seasons(data: Any) -> dict[int, int]:
+        """Return {season: aired episodes} from TMDb series details; specials are left out."""
+        if not isinstance(data, dict):
+            return {}
+        last = data.get('last_episode_to_air') or {}
+        last_season, last_episode = last.get('season_number'), last.get('episode_number')
+        if not isinstance(last_season, int):
+            return {}
+        aired = {}
+        for season in data.get('seasons') or []:
+            number = season.get('season_number') if isinstance(season, dict) else None
+            if not isinstance(number, int) or not 1 <= number <= last_season:
+                continue
+            count = last_episode if number == last_season and isinstance(last_episode, int) \
+                else season.get('episode_count') or 0
+            if count > 0:
+                aired[number] = count
+        return aired
 
     @staticmethod
     def _results(response, label: str) -> list | None:

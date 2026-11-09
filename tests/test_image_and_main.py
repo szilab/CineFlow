@@ -87,7 +87,6 @@ def test_main_initializes_shuts_down_and_entrypoint(monkeypatch) -> None:
     monkeypatch.setattr(
         "cineflow.main.signal.signal", lambda signum, handler: handlers.setdefault(signum, handler)
     )
-    monkeypatch.setattr("cineflow.main.bootstrap_configuration", lambda: ())
     main([])
     assert calls[-1] == "run"
     assert len(handlers) == 2

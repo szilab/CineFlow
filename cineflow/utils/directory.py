@@ -12,7 +12,8 @@ from cineflow.utils.image import ImageHandler
 from cineflow.core.bases.worker import WorkerBase
 from cineflow.core.logger import log
 from cineflow.utils.misc import sanitize_path
-from cineflow.runtime import export_directory, media_directory
+from cineflow.runtime import export_directory
+from cineflow.utils.video import placeholder_video, release_profile
 
 
 class DirectoryHandler:
@@ -26,13 +27,13 @@ class DirectoryHandler:
     _locks: dict[Path, Lock] = {}
     _locks_guard = Lock()
 
-    def __init__(self, directory: str) -> None:
-        """Initialize the directory handler."""
+    def __init__(self, directory: str, root: Path | None = None) -> None:
+        """Initialize the handler of a library folder inside the export root (default: EXPORT_DIRECTORY)."""
         self._max_item_age = self.DEFAULT_MIN_ITEM_AGE
         self._max_item_count = self.DEFAULT_MIN_ITEM_COUNT
         if not directory:
             raise ValueError("Directory name must be provided.")
-        self._root = export_directory()
+        self._root = Path(root) if root else export_directory()
         self._path = self._resolve_library_path(directory)
         # every handler of the same directory shares one lock
         with DirectoryHandler._locks_guard:
@@ -167,14 +168,9 @@ class DirectoryHandler:
             (item_path / f"Season {season:02d}").mkdir()
             file = f"Season {season:02d}/{file} S{season:02d}E01"
         file += '.mkv'
-        media_dir = self._media_directory()
-        if media_dir and self._copy_sample(
-            file_path=item_path / file, media_dir=media_dir, resolution=resolution,
-        ):
-            log(f"Media file for item '{item_name}' created from sample ({resolution or 'default'}).")
-        else:
-            Path(item_path / file).touch(exist_ok=True)
-            log(f"Media file for item '{item_name}' created as placeholder.")
+        video = placeholder_video(release_profile(media.get('torrent'), resolution))
+        (item_path / file).write_bytes(video)
+        log(f"Media file for item '{item_name}' written from the release metadata.")
         # Jellyfin derives "Date added" from the video file's timestamps and only
         # re-reads it when the modification time changes. Stamping the publish
         # time moves new and upgraded items to the front and nothing else.
@@ -327,7 +323,7 @@ class DirectoryHandler:
         try:
             target.relative_to(self._root)
         except ValueError as exc:
-            raise ValueError("Directory must be inside EXPORT_DIRECTORY.") from exc
+            raise ValueError("Directory must be inside the export directory.") from exc
         return target
 
     def _item_path(self, item: str | Path) -> Path:
@@ -344,27 +340,6 @@ class DirectoryHandler:
         except ValueError as exc:
             raise ValueError("Item path must be inside the configured library.") from exc
         return target
-
-    def _media_directory(self) -> Path | None:
-        """Get the media sample directory path."""
-        media_path = media_directory()
-        if media_path.exists() and media_path.is_dir():
-            sample_files = list(media_path.glob("sample.*.mp4"))
-            if sample_files:
-                return media_path
-            log(f"Media directory '{media_path}' exists but no sample files found.", level='DEBUG')
-        else:
-            log(f"Media directory '{media_path}' not found.", level='DEBUG')
-        return None
-
-    def _copy_sample(self, file_path: Path, media_dir: Path, resolution: str = None) -> bool:
-        """Copy a sample file matching the resolution to the destination path."""
-        source = media_dir / f"sample.{resolution}.mp4"
-        if source.exists():
-            shutil.copyfile(source, file_path)
-            return True
-        log(f"No exact sample match for resolution '{resolution}'.", level='DEBUG')
-        return False
 
     @property
     def path(self) -> Path:

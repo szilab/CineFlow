@@ -1,15 +1,21 @@
 """Jackett API consumer module."""
 
+from dataclasses import replace
+from datetime import date
 from typing import List, Any
 from cineflow.core.logger import log
 from cineflow.utils.misc import (
     sort_data, fix_imdbid, sanitize_name, media_resolution, search_preference_score,
-    release_parsers,
+    release_parsers, release_seasons, release_episodes,
 )
 from cineflow.core.bases.module import ConsumerBase
 from cineflow.core.schema import (
     ModuleDefinition, Field, LIMIT, consumer_actions,
 )
+
+RESOLUTIONS = ('360p', '480p', '720p', '1080p', '1440p', '2160p', '4320p')
+# release filters of the module, shown and overridable on every 'get' step
+RELEASE_FILTERS = ('min_seeders', 'resolution', 'size_limit_gb')
 
 
 class Jackett(ConsumerBase):
@@ -38,21 +44,24 @@ class Jackett(ConsumerBase):
             Field('url', 'url', 'URL', "Jackett base URL, e.g. http://jackett:9117.", required=True),
             Field('token', 'secret', 'API key', "Jackett API key.", required=True),
             LIMIT,
-            Field('include', 'string', 'Required words', "Words added to every search.", step=True,
-                  advanced=True),
-            Field('size_limit_gb', 'number', 'Size limit (GB)',
+            Field('min_seeders', 'integer', 'Minimum seeders',
+                  "Skip releases with fewer seeders; 0 means no limit.", minimum=0, step=True),
+            Field('resolution', 'select', 'Resolution', "Keep only releases of this resolution.",
+                  options=RESOLUTIONS, step=True),
+            Field('size_limit_gb', 'number', 'Maximum size (GB)',
                   "Skip larger releases; 0 means no limit.", minimum=0, step=True),
             Field('season_pack_only', 'boolean', 'Season packs only',
-                  "For TV, skip single-episode releases.", default=True, step=True),
+                  "For TV, skip single-episode releases when collecting releases or matching a series "
+                  "without a chosen season. A chosen season still uses episodes when it has no pack.",
+                  default=True, step=True),
         ),
-        actions=consumer_actions('Jackett', query=(
-            Field('include', 'string', 'Include words', "All words must be in the release name."),
-            Field('exclude', 'string', 'Exclude words', "Release names with these words are dropped."),
-            Field('seeders', 'integer', 'Minimum seeders', minimum=0),
-            Field('resolution', 'select', 'Resolution',
-                  options=('360p', '480p', '720p', '1080p', '1440p', '2160p', '4320p')),
-            Field('size', 'number', 'Maximum size (GB)', minimum=0),
-        )),
+        actions=tuple(replace(action, overrides=RELEASE_FILTERS) if action.id == 'get' else action
+                      for action in consumer_actions('Jackett', query=(
+                          Field('include', 'string', 'Include words', "All words must be in the release name.",
+                                advanced=True),
+                          Field('exclude', 'string', 'Exclude words',
+                                "Release names with these words are dropped.", advanced=True),
+                      ))),
     )
 
     def __init__(self, config: dict = None) -> None:
@@ -80,10 +89,26 @@ class Jackett(ConsumerBase):
         }
 
     def get(self, query: Any = None) -> List[dict] | None:
-        """Collect torrents from Jackett."""
-        results = self._get_results(keywords='')
-        if results is None:
-            return None
+        """Collect recent torrents from Jackett, at most ``limit``.
+
+        Indexers answer one page per search (about 50-100 releases) and do not
+        page further, so a search is joined by one with the current year added,
+        which mostly returns other releases. The search is blank, or the
+        ``include`` words of the query: a blank search only reaches the
+        releases of the last day or two.
+        """
+        words, year = self._search_words(query), str(date.today().year)
+        searches = [' '.join(words)] + ([] if year in words else [' '.join([*words, year])])
+        results, seen = [], set()
+        for keywords in searches:
+            found = self._get_results(keywords=keywords)
+            if found is None:
+                return None
+            for item in found:
+                if (key := item.get('link') or item.get('torrent')) not in seen:
+                    seen.add(key)
+                    results.append(item)
+        results.sort(key=lambda item: item.get('seeders') or 0, reverse=True)
         if query:
             results = self._apply_query(results=results, query=query)
         results = self._apply_search_pref(results)
@@ -92,16 +117,92 @@ class Jackett(ConsumerBase):
         return results[:self._limit] if results else []
 
     def search(self, media: dict) -> dict:
-        """Search torrents for the given title."""
+        """Search torrents for the given title; a series with a ``season`` gets that season."""
         if not media.get('title') or (self._kind != 'tv' and not media.get('year')):
             log(f"Item missing required fields: {media}", level='DEBUG')
             return None
+        if self._kind == 'tv' and isinstance(media.get('season'), int):
+            return self._season_release(media)
         if match := self._match_result(media=media):
             return match
         if media.get('alttitle') != media.get('title'):
             if match := self._match_result(media=media, titlekey='alttitle'):
                 return match
         return None
+
+    def _season_release(self, media: dict) -> dict | list[dict] | None:
+        """Return the release(s) of one season of a series.
+
+        Missing episodes of a season (``wanted_episodes``) get episode releases
+        only. A whole season gets a single-season pack, else releases of its
+        aired episodes, else the multi-season pack with the fewest extra seasons.
+        """
+        season, wanted = media['season'], media.get('wanted_episodes')
+        for titlekey in ('title', 'alttitle'):
+            if titlekey == 'alttitle' and media.get('alttitle') in (None, media.get('title')):
+                break
+            title = sanitize_name(name=media.get(titlekey))
+            if not title or len(title) < 2:
+                continue
+            results = self._season_results(title, season)
+            if results is None:
+                return None
+            if not wanted:
+                single = [item for item in results if release_seasons(item) == [season]]
+                if match := self.match(results=single, media=media):
+                    return match
+            aired = (media.get('seasons_aired') or {})
+            count = aired.get(season) or aired.get(str(season))
+            episodes = wanted or (list(range(1, count + 1)) if count else None)
+            if picks := self._episode_releases(results, media, season, episodes):
+                return picks
+            if wanted:
+                continue
+            # only when no single season and no episode exists: the pack with the fewest extra seasons
+            several = [item for item in results
+                       if (covered := release_seasons(item)) is None or (len(covered) > 1 and season in covered)]
+            several.sort(key=lambda item: len(release_seasons(item) or range(1000)))
+            if match := self.match(results=several, media=media):
+                log(f"No single-season release of '{media.get('title')}' season {season}, "
+                    f"using '{match.get('torrent')}'.")
+                return match
+        return None
+
+    def _season_results(self, title: str, season: int) -> list[dict] | None:
+        """Return the releases of a series title, with a second search for the season's episodes."""
+        releases = []
+        seen = set()
+        for keywords in (title, f"{title} S{season:02d}"):
+            results = self._get_results(keywords=keywords, packs_only=False)
+            if results is None:
+                return None
+            for item in self._apply_size_limit(results):
+                if (key := item.get('link') or item.get('torrent')) not in seen:
+                    seen.add(key)
+                    releases.append(item)
+        return self._apply_search_pref(releases)
+
+    def _episode_releases(self, results: list, media: dict, season: int, episodes: list | None) -> list[dict]:
+        """Return releases covering the episodes of a season, one release per episode (or episode range).
+
+        Without a known episode list every episode found is taken. A release of
+        one episode is preferred to one of several; then the search preference.
+        """
+        candidates = [item for item in results if item.get('season') == season and release_episodes(item)]
+        if episodes is None:
+            episodes = sorted({number for item in candidates for number in release_episodes(item)})
+        picks, covered = [], set()
+        for number in episodes:
+            if number in covered:
+                continue
+            options = sorted((item for item in candidates if number in release_episodes(item)),
+                             key=lambda item: len(release_episodes(item)))
+            if match := self.match(results=options, media=media):
+                picks.append(match)
+                covered.update(release_episodes(match))
+        if picks:
+            log(f"Season {season} of '{media.get('title')}': {len(picks)} episode release(s).")
+        return picks
 
     def _match_result(self, media: dict, titlekey: str = 'title'):
         results = self._search_w_title(media=media, titlekey=titlekey)
@@ -140,15 +241,18 @@ class Jackett(ConsumerBase):
         )
 
     def _apply_size_limit(self, results: list) -> list:
-        limit = int(self.cfg('size_limit_gb', default=0))
-        if not limit:
-            return results
-        # unknown size cannot be proven to fit the limit
-        return [r for r in results if r.get('size') is not None and r['size'] <= limit]
+        """Apply the release filters of the module: size limit, minimum seeders, resolution."""
+        limit = float(self.cfg('size_limit_gb', default=0) or 0)
+        if limit:
+            # unknown size cannot be proven to fit the limit
+            results = [r for r in results if r.get('size') is not None and r['size'] <= limit]
+        if seeders := int(self.cfg('min_seeders', default=0) or 0):
+            results = [r for r in results if (r.get('seeders') or 0) >= seeders]
+        if resolution := self.cfg('resolution'):
+            results = [r for r in results if r.get('resolution') == resolution]
+        return results
 
-    def _get_results(self, keywords: str = None) -> List[dict] | None:
-        if self.cfg('include'):
-            keywords += ' ' + self.cfg('include', default='')
+    def _get_results(self, keywords: str = None, packs_only: bool = True) -> List[dict] | None:
         response = self._handler.get(
             endpoint="/api/v2.0/indexers/all/results",
             params={
@@ -170,23 +274,25 @@ class Jackett(ConsumerBase):
         for item in sorted_items:
             if media := self.map(item=item):
                 results.append(media)
-        if self._kind == 'tv' and self.cfg('season_pack_only', default=True):
+        if packs_only and self._kind == 'tv' and self.cfg('season_pack_only', default=True):
             results = [item for item in results if item.get('episode') is None]
         return results
 
-    def _parse_query(self, q: Any) -> tuple[str, int, str, Any, int]:
-        default = '', 0, None, False, 0
+    def _parse_query(self, q: Any) -> tuple[str, Any]:
+        """Return the ``include`` and ``exclude`` words of a query."""
         if not q:
-            return default
+            return '', False
         if isinstance(q, str):
-            return q, 0, None, False, 0
+            return q, False
         if isinstance(q, dict):
-            return (
-                q.get('include', ''), q.get('seeders', 0), q.get('resolution', 0),
-                q.get('exclude', False), int(q.get('size', 0) or 0),
-            )
+            return q.get('include', ''), q.get('exclude', False)
         log(f"Invalid query type: {type(q)}. Query must be a string or a dictionary. Skipp option!")
-        return default
+        return '', False
+
+    def _search_words(self, query: Any) -> list[str]:
+        """Return the words every collected release must contain, sent to the indexers."""
+        include, exclude = self._parse_query(query)
+        return [] if exclude is True else self._query_words(include)
 
     @staticmethod
     def _query_words(value: Any) -> list[str]:
@@ -202,13 +308,7 @@ class Jackett(ConsumerBase):
         ``include`` filter; a string or list ``exclude`` value names words that
         must not be present, while ``include`` still applies.
         """
-        include, seed, resolution, exclude, size = self._parse_query(query)
-        if seed:
-            results = [r for r in results if (r.get('seeders') or 0) >= seed]
-        if resolution:
-            results = [r for r in results if r.get('resolution') == resolution]
-        if size and size > 0:
-            results = [r for r in results if r.get('size') is not None and r['size'] <= size]
+        include, exclude = self._parse_query(query)
         include_words = self._query_words(include)
         if exclude is True:
             exclude_words, include_words = include_words, []

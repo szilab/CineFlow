@@ -28,39 +28,40 @@ Named instances are optional; see [Module Instances](#module-instances).
 
 Nested dictionaries from global and step configuration are merged recursively, so a step can override one nested setting without replacing unrelated global values.
 
-## Configuration Directory
+## Application folder
 
-The configuration directory is defined with:
+Everything CineFlow keeps lives in one application folder, `CINEFLOW_HOME`:
 
-```bash
-CFG_DIRECTORY=/path/to/config
-```
-
-Typical structure:
+| Platform | `CINEFLOW_HOME` |
+|---|---|
+| Linux, macOS | `$XDG_CONFIG_HOME/cineflow`, default `~/.config/cineflow` |
+| Windows | `%APPDATA%\cineflow` |
+| Docker | `/data/cineflow` (the image sets `XDG_CONFIG_HOME=/data`) |
 
 ```text
-config/
-├── config.yaml
-├── from_tmdb.yaml
-├── from_lib.yaml
-└── custom_flow.yaml
+<CINEFLOW_HOME>/
+├── config/             config.yaml and the flow files (*.yaml)
+│   ├── .backups/       previous versions of files the GUI changed
+│   └── .cineflow/      GUI session secret
+├── library/            default export directory, see below
+├── debug/              files of the tools data_export / data_import actions
+└── cachedb.sqlite3     cache of service responses
 ```
 
-When either supported distribution starts with an empty configuration directory,
-the bundled example configuration is copied into it automatically. Existing files
-are never overwritten.
+The folders cannot be moved one by one. The only exception is the export
+directory (the library root the media server scans): the library module's
+`export_directory` setting or the `EXPORT_DIRECTORY` environment variable
+moves it, and the environment variable wins. A relative `export_directory`
+is relative to `CINEFLOW_HOME`. When `EXPORT_DIRECTORY` is set, the GUI shows
+the setting read-only.
 
-Runtime paths are controlled by the following variables:
+CineFlow starts without flows; create them in the GUI or as YAML files in
+`config/`.
 
-- `CINEFLOW_HOME` sets the application root for default `config`, `library`, and `media` directories.
-- `CFG_DIRECTORY` explicitly sets the configuration directory.
-- `EXPORT_DIRECTORY` explicitly sets the exported-library directory.
-- `MEDIA_DIRECTORY` optionally points to external `sample.<resolution>.mp4` files.
-
-The three explicit directory variables take precedence over `CINEFLOW_HOME`.
-Without overrides, the standalone Windows executable uses its own directory as
-the application root. Docker defines its existing `/config`, `/library`, and
-`/app/media` paths through environment variables.
+Exported items get a small `.mkv` file that holds no pictures, only stream
+headers built from the release name: resolution, video codec, bit depth,
+HDR10, HLG or Dolby Vision, and the audio codec and channels. Media servers
+show these properties; the file cannot be played.
 
 ## Global Configuration
 
@@ -104,6 +105,7 @@ qbittorrent:
   tags:
 
 library:
+  export_directory: /srv/media/cineflow   # optional
   limit: 50
   age: 30
 ```
@@ -120,10 +122,13 @@ tmdb:
   language: en-US
 ```
 
-TMDb and Jackett also accept `limit`, a safety cap on the items one *Get*
-collects (default 200, about 10 pages of TMDb trending titles). It is
-not shown in the GUI and normally needs no value. Jellyfin and Plex have no
-such setting.
+TMDb, Jackett, Jellyfin, Plex, Transmission and qBittorrent also accept
+`limit`, a safety cap on the items one *Get* step collects (default 200,
+about 10 pages of TMDb trending titles). It is not shown in the GUI and
+normally needs no value; set it in the module section (or a step `config`)
+to change it. It applies to collecting only: the *Not in*, *Also in* and
+*Next season* steps always compare with every item on the server. (The
+Library module's `limit` is the size of the library, see below.)
 
 Common settings:
 
@@ -146,26 +151,92 @@ IMDb ID, and falls back to a title search.
 jackett:
   url: http://jackett:9117
   token: API_KEY
-  include: HUN
-  size_limit_gb: 26
+  min_seeders: 10        # skip releases with fewer seeders (0: no limit)
+  resolution: 1080p      # keep only this resolution (empty: any)
+  size_limit_gb: 26      # skip larger releases (0: no limit)
 ```
+
+`min_seeders`, `resolution` and `size_limit_gb` filter every Jackett result,
+both when collecting releases (`get`) and when looking them up for items
+(`enrich`). A step may override them in its `config`; the GUI shows them on
+every Jackett source step with the module value as the default.
+
+Indexers return one page per search (about 50–100 releases each) and Jackett
+does not page further, so a blank search only reaches the releases of the
+last day or two. A *Get from Jackett* step therefore searches twice, once
+more with the current year added, and merges the results (most seeded
+first, duplicates removed) before `limit` applies. When its query has
+`include` words, the step searches for those words instead of a blank
+search, so older releases with these words are found too.
 
 Jackett can be used directly with download clients or omitted from workflows that
 use future higher-level integrations such as Radarr/Sonarr. The flow's
 `search_preference` (see [Flow settings](#flow-settings)) sorts the Jackett
-results: earlier entries receive higher scores.
+results by priority.
 Results that only carry a magnet URI use it as their `link`.
 
-A `get` step query supports `include` (all words must be present), `exclude`,
-`seeders`, `resolution`, and `size` (GB). `exclude` is either a word list or a
-string of words that must not be present, or `true` to invert `include`:
+A `get` step query supports `include` (all words must be present) and
+`exclude`, either a word list or a string of words that must not be present,
+or `true` to invert `include`:
 
 ```yaml
 input:
   query:
     include: HUN
     exclude: [CAM, TS]
-    seeders: 40
+config:
+  min_seeders: 40
+```
+
+To keep only some releases (for example Hungarian ones), add a *Filter by
+field* step (see [Tools](#tools)) after the source.
+
+### Tools
+
+The tools module needs no settings. Besides *Remove duplicates* and the
+debug export/import it has a *Filter by field* step (`filter_items`) that
+works on the items alone. Each of its `conditions` compares a `field` of an
+item with a `value`:
+
+| `match` | the condition holds when the field |
+|---|---|
+| `equals` (default) | is the value; text without case, numbers by value (`2024` = `"2024"`) |
+| `contains` | contains the value, without case |
+| `has_word` | has the value as a whole word, without case: any character other than a letter or digit (`.`, `-`, `_`, space, brackets) separates words, so `HUN` is in `Film.HUN-GRP` but not in `Hungry` |
+| `at_least` | is a number not smaller than the value |
+| `at_most` | is a number not larger than the value |
+
+`combine: all` (default) needs every condition (and), `combine: any` one of
+them (or). `matching: keep` (default) passes the matching items on,
+`matching: drop` removes them and passes the rest on. An item without the
+field, or without a number for `at_least` and `at_most`, does not meet the
+condition. A filter whose conditions are missing or incomplete keeps every
+item. The fields offered are `title`, `alttitle`, `year`, `kind`, `tmdbid`,
+`imdbid`, `torrent`, `resolution`, `seeders`, `size` (GB), `season`,
+`episode` and `directory`.
+
+```yaml
+# Hungarian releases with at least 40 seeders
+- name: Hungarian and seeded
+  module: tools
+  action: filter_items
+  input:
+    data: previous
+    query:
+      conditions:
+        - {field: torrent, match: contains, value: HUN}
+        - {field: seeders, match: at_least, value: 40}
+# HDR or Dolby Vision releases
+- name: HDR or Dolby
+  module: tools
+  action: filter_items
+  input:
+    data: previous
+    query:
+      combine: any
+      conditions:
+        - {field: torrent, match: contains, value: HDR}
+        - {field: torrent, match: contains, value: dolby}
 ```
 
 ### Jellyfin
@@ -178,6 +249,25 @@ jellyfin:
     users:
       - username
 ```
+
+A Jellyfin or Plex step query selects libraries with `parentLibrary`: one
+name or a list. With `isInverse: true` it selects every library except those,
+for example to compare with everything already on the server except the
+libraries that show the CineFlow export:
+
+```yaml
+- name: Not in Jellyfin
+  module: jellyfin
+  action: unique
+  input:
+    data: previous
+    query:
+      parentLibrary: [Trending Filmek, Trending Sorozatok]
+      isInverse: true
+```
+
+The GUI shows this as *Libraries: All / Only / All except* with the chosen
+libraries, and writes these two keys.
 
 Jellyfin can act as a media/library state source inside workflows, including favorite-based automation.
 
@@ -222,10 +312,13 @@ Authentication is optional when qBittorrent is configured to bypass WebAPI authe
 
 ### Library
 
-The internal library module creates and manages exported/dummy media entries under `EXPORT_DIRECTORY`.
+The internal library module creates and manages exported/dummy media entries in
+the export directory: `export_directory`, overridden by `EXPORT_DIRECTORY`,
+default `<CINEFLOW_HOME>/library`.
 
 ```yaml
 library:
+  export_directory: /srv/media/cineflow   # optional
   limit: 50
   age: 30
 ```
@@ -240,10 +333,18 @@ A background worker applies `limit` and `age` once an hour for every library
 directory used by a flow. The first cleanup runs one hour after start, so
 reading the library with `get` never deletes items.
 
-Earlier `search_preference` entries of the flow receive higher scores. When
-CineFlow finds a release for an item already exported to the library, it
+The flow's `search_preference` ranks releases (see
+[Flow settings](#flow-settings)). When CineFlow finds a release for an item already exported to the library, it
 rewrites the item only when the new release has a strictly higher score;
 tracker URL or seeder-count changes alone do not refresh it.
+
+Every exported item keeps its data in a `data.json` file of its folder. The
+`enrich` action of the library adds that data (e.g. the release, the resolution
+and the TMDb/IMDb IDs) to the items of an other source, such as the Jellyfin
+favorites of the exported library: in the flow editor it is offered under
+*Add data from* of a source step. Items match by TMDb or IMDb ID, else by title
+and year; the item's own values win, and `must_match: true` drops the items
+not in the library.
 
 Each exported video file gets the publish time as its modification time.
 Jellyfin derives "Date added" from these timestamps, so sorting the library by
@@ -256,34 +357,44 @@ directory rather than creating a duplicate.
 
 ## Poster Rules
 
-The library module can modify exported poster images according to rules.
-
-Example:
+An *Export to library* step (`library.put`) can change the posters of the
+items it exports. Its `poster_rules` setting is a list of rules; every rule
+whose condition holds applies, in order. In the GUI each rule is a card on
+the step.
 
 ```yaml
-library:
-  rules:
-    - expression: token
-      property: torrent
-      value: HUN
-      case_sensitive: false
-      color: red
-      modification: border
+- name: Export
+  module: library
+  action: put
+  input: previous
+  config:
+    poster_rules:
+      - property: torrent
+        expression: token
+        value: HUN
+        case_sensitive: false
+        modification: border
+        color: green
+      - property: imdbid
+        expression: missing
+        modification: grayscale
 ```
-
-Common fields:
 
 | Field | Description |
 |---|---|
-| `expression` | comparison such as `missing`, `exists`, `contains`, or `token` |
-| `modification` | visual operation such as `grayscale`, `border`, or `triangle` |
-| `property` | media property to evaluate |
-| `value` | optional comparison value |
-| `case_sensitive` | optional case-sensitivity flag |
+| `property` | item field to check, e.g. `torrent`, `resolution`, `seeders` |
+| `expression` | `token` (has word), `contains`, `eq`, `ne`, `gt`, `lt`, `exists` (default) or `missing` |
+| `value` | comparison value; not needed for `exists` and `missing` |
+| `case_sensitive` | text comparison with case (default `true`); YAML only |
+| `modification` | `border`, `triangle` (a corner) or `grayscale` (black and white) |
+| `color` | `yellow`, `blue`, `red` (default), `green`, `white`, `black` or `orange` |
+| `position` | corner of the `triangle`: `top-left`, `top-right` (default), `bottom-left`, `bottom-right` |
 
-`token` matches a complete release-name token. It matches `HUN` in
-`Some.Movie.2005.1080.HUN.DVDRip`, including when separated by `.`, `-`, `_`,
-or spaces, but does not match it inside `Hungry`.
+`token` (has word) matches a complete release-name word: any character other
+than a letter A-Z or a digit separates words. It matches `HUN` in
+`Some.Movie.2005.1080.HUN.DVDRip` or `Movie-HUN_GRP`, but not inside
+`Hungry`. Numbers such as `seeders`
+or `size` compare as numbers with `eq`, `ne`, `gt` and `lt`.
 
 ## Environment Overrides
 
@@ -381,17 +492,25 @@ search_preference: ["HUN", "HDR", "1080p", "2160p"]
 steps: ...
 ```
 
-- `library_directory` — the library folder inside `EXPORT_DIRECTORY` (in
-  Docker `/library`, so `film` means `/library/film`). Without a value the
+- `library_directory` — the library folder inside the export directory
+  (with the default `<CINEFLOW_HOME>/library`, `film` means
+  `<CINEFLOW_HOME>/library/film`). Without a value the
   folder is named after the flow's media kind: `movie` or `tv`. Every library
   step of the flow uses it. A torrent client's own `directory` (download
   folder) is unrelated.
-- `search_preference` — release name words in order of preference. Jackett
-  sorts its results by it, and the library replaces an exported item only with
-  a better-ranked release. Jackett and the library steps of the flow use it.
+- `search_preference` — release name words by priority. The first word
+  decides: a release containing it beats every release without it, whatever
+  else they contain; the second word only decides between releases equal on
+  the first, and so on. With `[HUN, HDR, 1080p, 2160p]` a
+  `Dune.2021.720p.HUN` release beats `Dune.2021.1080p.HDR.ENG`, and among HUN
+  releases an HDR one wins. Jackett sorts its results by it, and the library
+  replaces an exported item only with a better-ranked release. Jackett and the
+  library steps of the flow use it.
 
 These come only from the flow: the same keys in the `library` or `jackett`
-section of `config.yaml` or in a step `config` have no effect.
+section of `config.yaml`, in an instance or in a step `config` have no
+effect, and `cineflow validate` warns about them like about any unknown
+setting. In the GUI both are in the flow header.
 
 ## Validation
 

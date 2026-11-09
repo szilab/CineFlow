@@ -24,7 +24,7 @@ Docker:
 ```bash
 docker run -e CINEFLOW_WEB_PORT=8080 -e CINEFLOW_AUTH=password \
   -e CINEFLOW_AUTH_PASSWORD_HASH='pbkdf2_sha256$600000$...' \
-  -p 8080:8080 -v ./config:/config -v ./library:/library <image>
+  -p 8080:8080 -v ./cineflow-data:/data <image>
 ```
 
 Without authentication the GUI only starts on a loopback address. On any
@@ -52,7 +52,7 @@ Authentication is optional. Choose one or more methods with `CINEFLOW_AUTH`
 
 Sessions are signed, `HttpOnly`, `SameSite=Lax` cookies (`Secure` when the
 public URL is https). The signing key comes from `CINEFLOW_SECRET_KEY` or is
-generated once into `CFG_DIRECTORY/.cineflow/secret` (mode 600). All settings
+generated once into `<CINEFLOW_HOME>/config/.cineflow/secret` (mode 600). All settings
 are environment variables, so nothing in the GUI can weaken or lock out its
 own sign-in.
 
@@ -133,7 +133,20 @@ fields and the actions it publishes. A field has a type (`string`, `integer`,
 required flag, default, range or options, description, and whether a flow step
 may override it (`step`). An action declares its input kind (`none`, `data`,
 `query`, `data+query`), its known query keys, extra arguments, its own step
-settings (for example `must_match`), and whether it is destructive.
+settings (for example `must_match`), whether it is destructive, and its
+*stage* in the flow editor:
+
+| Stage | Meaning | Derived when not declared |
+|---|---|---|
+| `source` | collects items | takes no items (`none` or `query` input) |
+| `enrich` | adds data to every item | takes items only (`data`) |
+| `combine` | merges several sources | declared (`tools.remove_duplicates`) |
+| `filter` | drops items | takes items and a query (`data+query`) |
+| `output` | changes something outside CineFlow | `side_effects` or `destructive` |
+
+An action marked `local` works on the items alone without contacting its
+service (for example *Exclude by ID* or *Filter by field*); the flow editor lists
+it once, in the *Any items* group.
 
 The GUI renders every form from these definitions. Adding a module or an
 action only needs a Python definition; no frontend change.
@@ -169,17 +182,40 @@ Instance status is shown as **valid**, **incomplete** (only required values
 are missing) or **invalid** (wrong values). Only valid instances can be used in
 a flow, and an instance used by a flow cannot be deleted.
 
+### Settings set by environment variables
+
+A module setting that an environment variable overrides (`<MODULE>_<KEY>`, or
+the field's own `env`, such as `EXPORT_DIRECTORY` for the library
+`export_directory`) is shown read-only with the variable's value and name;
+secrets show only that they are set. The YAML value stays in the file but has
+no effect while the variable is set. Paths are always shown in full.
+
+### Dropdowns read from the services
+
+A field may name a list of valid values that its module reads from the
+service (`Field.choices`, answered by `ModuleBase.field_choices`). The GUI
+shows such a field as a dropdown filled from the step's module instance:
+the library of Jellyfin and Plex steps and the Jellyfin user. The list comes
+from `GET instances/<id>/choices/<list>`, which needs valid module settings,
+is kept for five minutes and is read again after the module settings are
+saved. A value that is no longer offered is shown as *(not found)*; when the
+list cannot be read, the field falls back to a text input. A field with an
+`all_key` gets an *All* entry that writes that boolean key instead: the
+Jellyfin *User* dropdown offers *Default* (the first user), *All users*
+(`allUsers: true`) or one user (`userName`).
+
 ### Secrets
 
 Fields of type `secret` (and undeclared keys that look like credentials, such
 as `token` or `password`) are never sent to the browser and never exported.
-The GUI shows only whether a secret is stored. Saving without typing a new
-value keeps the stored one; the "Clear stored value" box removes it. Logs
+The GUI shows a stored secret as a mask. Saving with the mask unchanged
+keeps the stored value, a typed value replaces it, and an emptied field
+deletes it: the field warns about it and saving asks for confirmation. Logs
 redact credentials as before.
 
 ### Flows
 
-A flow stays a YAML file in `CFG_DIRECTORY` with the same keys and semantics.
+A flow stays a YAML file in `<CINEFLOW_HOME>/config` with the same keys and semantics.
 The GUI adds two optional keys that the runtime ignores:
 
 - `description` — free text;
@@ -198,54 +234,115 @@ they are valid, performs one cheap authenticated request (TMDb, Jackett,
 Jellyfin, Plex, Transmission, qBittorrent) with them; *Save* writes
 `config.yaml`. Saving settings rebuilds the module objects of every
 flow, so the change applies from the next step without a restart.
-Text fields and switches sit side by side in two equal columns; word lists
-(e.g. *Search preference*) take a full row at the end of their section.
+Fields are listed in one column; word lists (e.g. *Search preference*) come
+at the end of their section.
 
-Word lists (here and on steps) are edited as labels: type a word and press
+Every form uses the same layout: one-line inputs and dropdowns come first,
+with their label in front and the hint under the label; then the on/off
+switches, two to a row when they fit, each switch in front of its label (its
+hint is shown on hover); lists come last. Yes/no and short choice
+lists are text sliders like the flow header switches, longer lists are
+dropdowns. Word lists (here and on steps) are edited as labels: type a word and press
 Enter or the arrow inside the field to add it; drag labels to change their
 order (or focus one and use Alt+arrow keys), and remove one with its ×
-(or Delete). Lists of mappings, such as the library poster rules, stay a
-JSON text box.
+(or Delete). Lists of mappings whose fields are declared (`item_fields`),
+such as the filter conditions and the poster rules, are edited as cards,
+one per item, with *+ Add …* and a remove button; other lists of mappings
+stay a JSON text box.
 
 **Flows** has a second menu row with one entry per flow (long names are
 shortened; a dot shows enabled, disabled, invalid or running) and a *+* at
 the end. *+* opens a small dialog that creates a disabled flow without steps
-from a name, description, media kind and schedule, or imports one from YAML.
+from a name, description and media kind, or imports one from YAML.
 
-The flow page shows the flow name as its title with the description below;
-both are edited in place. Next to them are the flow media kind (*Movies* or
-*TV series*, passed to every step; it is not a module setting) and the
-*Save*, *Test run*, *Run now*, *Export YAML* and *Delete* buttons. Below:
+#### Flow header
 
-- left, the *Schedule* card (enabled switch, interval, priority), the
-  *Library & releases* card when a Library or Jackett step needs it (the
-  library folder inside the export directory, default the media kind, and
-  the release preference as word labels), and the *Actions* card: click a module name to open its actions (one module is
-  open at a time), then drag an action anywhere into the pipeline or click
-  it to append it; the *+* between two cards and *+ Add action* open the
-  searchable action catalog;
-- middle, the steps as a vertical pipeline of cards: drag a card (or focus it
-  and press Alt+↑/↓) to reorder, *⧉* duplicates it, *✕* or the Delete key
-  removes it, *▶* test runs up to it; a card whose module has no complete
-  settings shows *set up*, which opens the module settings in a dialog;
-- right, the settings of the selected step (click the card again to close
-  them): name, action, input source (previous step, a named earlier step, or
-  several merged steps), query, arguments and the action's own settings.
-  Yes/no values are switches. Options a regular user rarely needs (marked
-  `advanced` in the module definition, e.g. item limits, search
-  term, inverse queries, extra JSON parameters) are in a collapsed *More
-  options* section, which opens by itself when one of them is in use; the
-  Modules page groups such settings the same way. The module is shown at the top right, green
-  when it is ready and red when it still needs settings; click it to open the
-  module settings. Connections and the other module settings (limits,
-  download folders, …) belong to the module. A step keeps showing a module
-  setting only when its YAML already overrides it, or when a required
-  step-level value is missing, with *Use module value* to drop the override.
+The top box of the flow page holds everything that belongs to the whole flow:
 
-Cards and fields show errors and warnings from the backend validator while
-you type. *Test run* runs the flow with real data but **without side
-effects** — see below. *Save* writes the YAML file and reloads the flow at
-once; *Run now* starts one run in the background.
+- the name and the description, edited in place;
+- top right, the state of the flow: *valid* or the number of errors, warnings,
+  *unsaved* and *running*;
+- below the description, three switches:
+  - **Media**: *Movies*, *TV series* or *Both*. The kind is passed to every
+    step (it is not a module setting). *Both* runs the flow twice, first for
+    movies, then for TV series;
+  - **Schedule**: *Disabled*, *10m*, *30m*, *1h*, *4h*, *12h*, *1d* or *1w*.
+    *Disabled* writes `enabled: false` and keeps the interval; any other value
+    enables the flow with that `delay`. An interval written by hand (for
+    example 15 minutes) is shown as an extra choice;
+  - **Priority**: *Low*, *Medium* or *High*, written as `priority` 100, 10
+    or 1 (lower runs first in sequential mode). Hand-written numbers are shown
+    as *High* up to 5, *Medium* up to 50 and *Low* above;
+- below them, while a Library or Jackett step uses them, the flow settings
+  those modules share, side by side with their labels above them: the
+  *Library folder* inside the export directory (default the media kind; the
+  field shows the full export path in front of the folder name, and a flow of
+  both kinds says which folder each kind goes to) and the *Release preference*
+  as numbered word labels (see [CONFIGURATION.md](CONFIGURATION.md#flow-settings));
+- bottom right, the *Save*, *Run*, *Test* and *Delete* buttons. *Save* writes
+  the YAML file and reloads the flow at once; *Run* starts one run in the
+  background (save first); *Test* runs the flow with real data but **without
+  side effects** (see below).
+
+#### Flow editor
+
+Below the header the flow is shown as three columns:
+
+1. **Sources**: where the items come from. *+ Add a source* only asks for
+   the module (grouped by module category), because every module has one way
+   to collect items. At the top of the settings of a source, *Add data from*
+   has a three-way switch per service that looks up every item of the source
+   (for example release links from Jackett or the title in your language from
+   TMDb): *Off*, *On* (add the data when the item is found) or *Must* (also
+   drop the items that are not found; `must_match: true`). Only set-up modules of another category than the source
+   are offered, so a Jellyfin source gets no Plex switch; a service the flow
+   already uses stays listed so it can be switched off. The data is added in
+   the order of the module list (TMDb before Jackett); the source card lists
+   the services. With several sources the items are merged into one list and
+   duplicates are removed automatically.
+2. **Filters** (optional): keep only the items you want, for example
+   *Not in Jellyfin*, *Exclude by ID*, *Filter by field* (one or more
+   conditions such as "the release name contains HUN" or "at least 40
+   seeders", combined with and/or) or *Next season to
+   download* (TV), or
+   add data to the items left, e.g. the release of the chosen season from
+   Jackett. These steps run in their order, after the merge.
+3. **Actions**: what happens with the items, for example *Add torrents* or
+   *Export to library*. Every action gets the filtered items.
+
+The *+* buttons only offer actions that fit the column. Click a card to open
+its few options on the right; click it again or *✕* to close them. Options
+a regular user rarely needs (marked `advanced` in the module definition,
+e.g. item limits, search term, inverse queries, extra JSON parameters) are in
+a collapsed *More options* section, which opens by itself when one is in use.
+Library fields of Jellyfin and Plex steps are a *Libraries* choice: *All*,
+*Only* or *All except*, with one or more libraries picked from the server.
+It writes `parentLibrary` (one name or a list) and `isInverse` into the step,
+so excluding what is already on the media server except the CineFlow
+libraries is *Not in Jellyfin* with *All except* and those libraries. An action may list module settings to show on its step (`overrides`): empty
+means the module value, shown as *inherit (…)*, and a value is stored as the
+step's override in `config`. The Jackett source step shows *Minimum seeders*,
+*Resolution* and *Maximum size* this way; its include and exclude words are
+under *More options*. The module is shown at the top right of the step panel, green
+when it is ready and red when it still needs settings; click it to open the
+module settings. A step keeps showing a module setting only when its YAML
+already overrides it, or when a required step-level value is missing, with
+*Use module value* to drop the override. Cards and fields show errors and
+warnings from the backend validator while you type, and a card whose module
+has no complete settings shows *set up*.
+
+Step names, inputs and the merge step are written automatically and step
+names are not shown (they appear in test runs and logs), so there is nothing
+to wire: the sources and their data steps first, then the merge
+(`tools.remove_duplicates` with the list of sources), the filters with
+`input: previous`, the first action with `input: previous` and further
+actions with a `{{name}}` reference to the last filter. A test run shows the
+item count on each card (for *Both*, the movie and TV counts).
+
+A flow that does not have this shape, for example one with a second source
+after the actions or a filter on only one of several sources, is shown with
+the reason instead of the columns. It keeps running as before; edit its YAML
+file by hand or split it into several flows. Its header switches still work.
 
 A flow with validation errors can only be saved disabled, as a draft. If the
 file changed on disk after it was opened, saving is refused until it is
@@ -265,8 +362,11 @@ actions really query your services, so the result shows what the flow would
 work with. Actions that change something outside CineFlow — adding torrents,
 writing or removing library items, exporting files — are not called; they pass
 their input on and are marked *skipped in test*. The panel shows each step's
-result, item count and duration, a table of the first 25 items (credentials in
-values are masked) and the log messages of the test. A test is stopped after
+result, item count and duration, a table of its items 25 to a page
+(credentials in values are masked) and the log messages of the test. The
+pager browses up to 2000 items per step; the pages are read from the server,
+which keeps the last five test results, so after a restart the test must be
+run again to page. A test is stopped after
 three minutes; at most two run at the same time.
 
 The execution mode is set with `execution` in `config.yaml`. A validation
@@ -300,7 +400,7 @@ it does not refuse to run flows that worked before.
 
 ## Backups and storage
 
-Every GUI write first copies the previous file to `CFG_DIRECTORY/.backups`
+Every GUI write first copies the previous file to `<CINEFLOW_HOME>/config/.backups`
 (the last 20 versions per file are kept) and then replaces the file
 atomically. Deleting a flow also leaves a backup. Writing `config.yaml` from
 the GUI drops YAML comments in it; the backup keeps the original.
@@ -328,12 +428,14 @@ All endpoints are below `api/` and exchange JSON. Errors have the form
 | `POST instances/<id>/validate` | validate saved or unsaved `{config}` |
 | `POST instances/<id>/test` | connection test with saved or unsaved `{config}` |
 | `POST instances/test-all` | connection test of every complete instance |
+| `GET instances/<id>/choices/<list>` | values of a dropdown field read from the service, e.g. `libraries` |
 | `GET flows` | flows with validation and runtime state |
 | `POST flows` | create `{flow}` |
 | `GET/PUT/DELETE flows/<id>` | read (with `revision`), save `{flow, revision}`, delete |
 | `POST flows/validate` | validate an unsaved `{flow}` |
 | `POST flows/import` | create from `{yaml, as_draft?}` |
 | `POST flows/test` | test run of `{flow, id?, until?}` without side effects |
+| `GET flows/test/<test>/<step>/<page>` | one page of the items of a step result of a recent test run |
 | `GET flows/<id>/yaml` | export without secrets |
 | `POST flows/<id>/run` | start one manual run |
 | `GET flows/<id>/logs` | recent log messages of the flow |
@@ -369,6 +471,15 @@ Decisions:
   versioning through backups and git.
 - **The backend owns all rules.** The frontend only renders definitions and
   issues returned by the API.
+- **The flow states what runs.** GUI conveniences are written into the flow
+  YAML as explicit values (the merge step, step inputs, `allUsers`,
+  `parentLibrary` with `isInverse`, `must_match`, step overrides) instead of
+  defaults the runtime would apply silently, so a flow file reads the same as
+  it runs.
+- **The flow editor is a view.** `static/funnel.js` reads the step list as
+  sources → merge → filters → actions and writes it back; the YAML format and
+  the runtime do not change. Action stages come from the module definitions,
+  so a new module appears in the right column without frontend changes.
 
 ## Known limitations
 
@@ -377,6 +488,8 @@ Decisions:
   deleting the generated key file) signs everyone out.
 - Execution mode changes need a restart (shown in the GUI).
 - Flows remain linear pipelines with name references; there are no branches.
+  The GUI edits flows of the form sources → merge → filters → actions;
+  others are edited by hand.
 - The log view keeps the last 2000 messages of the process in memory
   (`LOG_HISTORY`); it is empty after a restart.
 - Connection tests check reachability and credentials, not library names or

@@ -126,3 +126,10 @@ def test_list_input_is_treated_as_items_not_as_a_query() -> None:
 def test_unknown_parent_library_is_rejected() -> None:
     with pytest.raises(ValueError, match="not found in Plex"):
         plex()._parse_query({"parentLibrary": "missing"})
+
+
+def test_field_choices_list_libraries_only() -> None:
+    client = plex()
+
+    assert client.field_choices("libraries") == ["first", "second"]
+    assert client.field_choices("users") is None

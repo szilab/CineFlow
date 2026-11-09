@@ -7,7 +7,7 @@ so adding a module or action needs no frontend change.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -21,6 +21,10 @@ INPUT_DATA = 'data'      # takes the item list of earlier steps
 INPUT_QUERY = 'query'    # takes an optional query
 INPUT_BOTH = 'data+query'
 INPUT_KINDS = (INPUT_NONE, INPUT_DATA, INPUT_QUERY, INPUT_BOTH)
+# where an action belongs in the simple flow editor: sources collect items, enrich
+# steps add data to them, a combine step merges several sources, filters drop
+# items, and outputs change something outside CineFlow
+STAGES = ('source', 'enrich', 'combine', 'filter', 'output')
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,8 @@ class Field:  # pylint: disable=too-many-instance-attributes
     required: bool = False
     default: Any = None
     options: tuple = ()
+    # GUI text of each option, same order as ``options``; the option value when empty
+    option_labels: tuple = ()
     minimum: float | None = None
     maximum: float | None = None
     # module fields a workflow step may override in its ``config``
@@ -43,6 +49,28 @@ class Field:  # pylint: disable=too-many-instance-attributes
     hidden: bool = False
     # item type of a 'list': 'text' (words, edited as labels) or 'object' (mappings)
     item_type: str = 'text'
+    # fields of every mapping of an 'object' list; the GUI edits each item as a card
+    item_fields: tuple = ()
+    # name of one item of such a list in the GUI, e.g. 'Condition'
+    item_label: str = ''
+    # the order of a list is a priority; the GUI numbers its items
+    ordered: bool = False
+    # name of a list of valid values the module reads from its service (see
+    # ModuleBase.field_choices), e.g. 'libraries'; the GUI shows a dropdown
+    choices: str = ''
+    # boolean key the dropdown's "All" entry sets instead of this field, e.g. 'allUsers'
+    all_key: str = ''
+    # a text field that also takes a list of values (e.g. several libraries)
+    multiple: bool = False
+    # boolean query key that turns this selection into "everything except it",
+    # e.g. 'isInverse'; the GUI shows All / Only / All except
+    inverse_key: str = ''
+    # environment variable that overrides this module setting; default <MODULE>_<KEY>
+    env: str = ''
+
+    def environment_name(self, module_id: str) -> str:
+        """Return the environment variable that overrides this setting of a module."""
+        return self.env or f"{module_id}_{self.key}".upper()
 
     def __post_init__(self) -> None:
         if self.type not in FIELD_TYPES:
@@ -62,12 +90,21 @@ class Field:  # pylint: disable=too-many-instance-attributes
             'required': self.required,
             'default': self.default,
             'options': list(self.options),
+            'option_labels': list(self.option_labels),
             'minimum': self.minimum,
             'maximum': self.maximum,
             'step': self.step,
             'advanced': self.advanced,
             'hidden': self.hidden,
             'item_type': self.item_type,
+            'item_fields': [item.to_dict() for item in self.item_fields],
+            'item_label': self.item_label,
+            'ordered': self.ordered,
+            'choices': self.choices,
+            'all_key': self.all_key,
+            'multiple': self.multiple,
+            'inverse_key': self.inverse_key,
+            'env': self.env,
         }
 
 
@@ -91,10 +128,31 @@ class ActionDefinition:  # pylint: disable=too-many-instance-attributes
     side_effects: bool = False
     # 'get' semantics: None output means retrieval failure and stops the flow
     retrieval: bool = False
+    # stage in the simple flow editor; derived from the other values when empty
+    stage: str = ''
+    # module setting keys always shown on the step, with the module value as the
+    # default and an override on the step (``config``)
+    overrides: tuple[str, ...] = ()
+    # works on the items alone without contacting the module's service, so it
+    # is the same action in every module that publishes it
+    local: bool = False
 
     def __post_init__(self) -> None:
         if self.input not in INPUT_KINDS:
             raise ValueError(f"Unknown input kind '{self.input}' for action '{self.id}'.")
+        if self.stage and self.stage not in STAGES:
+            raise ValueError(f"Unknown stage '{self.stage}' for action '{self.id}'.")
+
+    @property
+    def effective_stage(self) -> str:
+        """Return the declared stage, or the one implied by the input and side effects."""
+        if self.stage:
+            return self.stage
+        if self.side_effects or self.destructive:
+            return 'output'
+        if not self.takes_data:
+            return 'source'
+        return 'filter' if self.takes_query else 'enrich'
 
     @property
     def takes_data(self) -> bool:
@@ -120,6 +178,9 @@ class ActionDefinition:  # pylint: disable=too-many-instance-attributes
             'destructive': self.destructive,
             'side_effects': self.side_effects or self.destructive,
             'retrieval': self.retrieval,
+            'stage': self.effective_stage,
+            'local': self.local,
+            'overrides': list(self.overrides),
         }
 
 
@@ -212,6 +273,9 @@ def _is_empty(value: Any) -> bool:
 
 def validate_value(spec: Field, value: Any, path: tuple) -> list[Issue]:  # noqa: C901
     """Validate one present, non-empty value against its field type and range."""
+    if spec.multiple and isinstance(value, list):
+        single = replace(spec, multiple=False)
+        return [issue for index, item in enumerate(value) for issue in validate_value(single, item, (*path, index))]
     kind = spec.type
     if kind == 'boolean' and not isinstance(value, bool):
         return [error(path, "Expected true or false.", 'type')]
@@ -223,6 +287,9 @@ def validate_value(spec: Field, value: Any, path: tuple) -> list[Issue]:  # noqa
         return [error(path, "Expected text.", 'type')]
     if kind == 'list' and not isinstance(value, list):
         return [error(path, "Expected a list.", 'type')]
+    if kind == 'list' and spec.item_fields:
+        return [issue for index, item in enumerate(value)
+                for issue in validate_fields(spec.item_fields, item, (*path, index))]
     if kind == 'object' and not isinstance(value, dict):
         return [error(path, "Expected a mapping.", 'type')]
     if kind == 'select' and value not in spec.options:
@@ -248,8 +315,8 @@ def validate_fields(
 ) -> list[Issue]:
     """Validate a configuration mapping against field definitions.
 
-    ``env_prefix`` names the module whose ``<MODULE>_<KEY>`` environment
-    variables may supply required values, matching the runtime precedence.
+    ``env_prefix`` names the module whose environment variables (``<MODULE>_<KEY>``
+    or ``Field.env``) may supply required values, matching the runtime precedence.
     """
     if values is None:
         values = {}
@@ -260,7 +327,7 @@ def validate_fields(
     for spec in specs:
         value = get_path(values, spec.key)
         if _is_empty(value) or value == []:
-            from_env = env_prefix and f"{env_prefix}_{spec.key}".upper() in os.environ
+            from_env = env_prefix and spec.environment_name(env_prefix) in os.environ
             if check_required and spec.required and not from_env:
                 issues.append(error((*path, spec.key), f"'{spec.label or spec.key}' is required.", 'required'))
             continue
@@ -284,6 +351,9 @@ def mask_secrets(definition: ModuleDefinition | None, values: dict) -> tuple[dic
 
 MEDIA_KINDS = ('movie', 'tv')
 DEFAULT_MEDIA_KIND = 'movie'
+# a flow of kind 'both' runs once for every media kind
+BOTH_KINDS = 'both'
+FLOW_KINDS = (*MEDIA_KINDS, BOTH_KINDS)
 
 
 def flow_media_kind(flow: Any) -> str | None:
@@ -291,7 +361,12 @@ def flow_media_kind(flow: Any) -> str | None:
     if not isinstance(flow, dict):
         return None
     kind = flow.get('kind') or DEFAULT_MEDIA_KIND
-    return kind if kind in MEDIA_KINDS else None
+    return kind if kind in FLOW_KINDS else None
+
+
+def run_kinds(kind: str) -> tuple[str, ...]:
+    """Return the media kinds one run of a flow of ``kind`` covers, in run order."""
+    return MEDIA_KINDS if kind == BOTH_KINDS else (kind,)
 
 
 def is_secret_key(key: str) -> bool:
@@ -300,14 +375,21 @@ def is_secret_key(key: str) -> bool:
     return any(word in lowered for word in ('token', 'password', 'apikey', 'api_key', 'secret', 'passkey'))
 
 
+# item fields offered by the condition editors (filter conditions, poster rules)
+ITEM_FIELDS = (
+    'title', 'alttitle', 'year', 'kind', 'tmdbid', 'imdbid', 'torrent', 'resolution',
+    'seeders', 'size', 'season', 'episode', 'directory', 'percent_done',
+)
+
 # Fields shared by several modules
 # safety cap of collecting actions; high enough that users never need to change it
 LIMIT = Field('limit', 'integer', 'Limit', "Maximum number of collected items.", default=200, minimum=1,
               step=True, hidden=True)
 SEARCH_PREFERENCE = Field(
     'search_preference', 'list', 'Release preference',
-    "Release name words in order of preference, e.g. HUN, HDR, 1080p. Picks the torrent "
-    "and decides whether a library item is replaced by a better release.", default=[],
+    "Release name words by priority: the first word decides, the next one only on a tie "
+    "(a HUN release beats any release without HUN). Picks the torrent and decides whether a "
+    "library item is replaced by a better release.", default=[], ordered=True,
 )
 LIBRARY_DIRECTORY = Field(
     'library_directory', 'path', 'Library folder',
@@ -340,9 +422,12 @@ MUST_MATCH = Field(
 
 # query keys shared by the media server modules
 MEDIA_SERVER_QUERY = (
-    Field('parentLibrary', 'string', 'Library', "Library name to query."),
+    Field('parentLibrary', 'string', 'Libraries',
+          "All libraries, only the chosen ones, or all except them (e.g. the CineFlow libraries).",
+          choices='libraries', multiple=True, inverse_key='isInverse'),
     Field('searchTerm', 'string', 'Search term', advanced=True),
-    Field('isInverse', 'boolean', 'Inverse', "Return the library items outside the query.", advanced=True),
+    # set by the Libraries choice "All except"
+    Field('isInverse', 'boolean', 'All except', "Return the library items outside the query.", hidden=True),
 )
 
 
@@ -367,9 +452,44 @@ def consumer_actions(server: str, query: tuple[Field, ...] = ()) -> tuple[Action
         ),
         ActionDefinition(
             'exclude', 'Exclude by ID', "Drop items whose IMDb or TMDb ID is listed.",
-            input=INPUT_BOTH, query=(
+            input=INPUT_BOTH, local=True, query=(
                 Field('imdb_ids', 'list', 'IMDb IDs', "Numeric IMDb IDs to drop."),
                 Field('tmdb_ids', 'list', 'TMDb IDs', "TMDb IDs to drop."),
             ),
         ),
     )
+
+
+# download clients: give the downloads Jellyfin folder names
+RENAME_FOLDERS = ActionDefinition(
+    'rename', 'Name folders for Jellyfin',
+    "Renames the folder of each added torrent to Title (year) [tmdbid-N], so Jellyfin recognizes it. "
+    "Put a Wait step before it: a new torrent needs a few seconds to get its file list.",
+    input=INPUT_DATA, side_effects=True,
+    fields=(Field('suffix', 'string', 'Text after the name',
+                  "Added after Title (year) [tmdbid-N]; {field} inserts a field of the item. "
+                  "E.g. ' - {resolution}' gives 'Film (2020) [tmdbid-1] - 1080p'."),),
+)
+
+
+# query of the download clients' get, unique and common actions
+TORRENT_QUERY = (
+    Field('min_age', 'number', 'Added at least (hours) ago',
+          "Only torrents added at least this many hours ago; 0 keeps every torrent. "
+          "A torrent whose add time is unknown is left out.", default=0, minimum=0),
+)
+# download clients: remove and move the downloads
+DELETE_TORRENTS = ActionDefinition(
+    'delete', 'Remove torrents',
+    "Removes the torrent of each item from the client. The downloaded files stay unless "
+    "'Delete files' is on.",
+    input=INPUT_DATA, destructive=True,
+    fields=(Field('delete_files', 'boolean', 'Delete files',
+                  "Also delete the downloaded data from the disk.", default=False),),
+)
+MOVE_TORRENTS = ActionDefinition(
+    'move', 'Move torrents',
+    "Moves the data of each item's torrent into a folder of the client's machine.",
+    input=INPUT_DATA, side_effects=True,
+    fields=(Field('location', 'string', 'Target folder', "Folder on the client's machine.", required=True),),
+)
