@@ -210,8 +210,11 @@ item with a `value`:
 them (or). `matching: keep` (default) passes the matching items on,
 `matching: drop` removes them and passes the rest on. An item without the
 field, or without a number for `at_least` and `at_most`, does not meet the
-condition. A filter whose conditions are missing or incomplete keeps every
-item. The fields offered are `title`, `alttitle`, `year`, `kind`, `tmdbid`,
+condition. `kind: movie` or `kind: tv` (default `both`) limits the filter to
+the items of that media kind (the item's `kind`, else the kind of the flow
+pass); the other items go on unchanged, so one flow of kind `both` can filter
+movies and series differently. A filter whose conditions are missing or
+incomplete keeps every item. The fields offered are `title`, `alttitle`, `year`, `kind`, `tmdbid`,
 `imdbid`, `torrent`, `resolution`, `seeders`, `size` (GB), `season`,
 `episode` and `directory`.
 

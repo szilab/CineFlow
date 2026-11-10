@@ -476,3 +476,26 @@ def test_library_enrich_is_offered_as_data_source() -> None:
     action = catalog.definition("library").action("enrich")
     assert action.effective_stage == "enrich"
     assert [spec.key for spec in action.fields] == ["must_match"]
+
+
+def test_tools_filter_kind_limits_the_filter_to_that_media_kind() -> None:
+    items = [
+        {"title": "Movie A", "kind": "movie", "seeders": 5},
+        {"title": "Movie B", "kind": "movie", "seeders": 90},
+        {"title": "Show A", "kind": "tv", "seeders": 5},
+        {"title": "Show B", "kind": "tv", "seeders": 90},
+    ]
+    seeded = cond("seeders", "50", "at_least")
+    tools = Tools()
+
+    assert titles(tools.filter_items(items, where(seeded))) == ["Movie B", "Show B"]
+    assert titles(tools.filter_items(items, where(seeded, kind="both"))) == ["Movie B", "Show B"]
+    assert titles(tools.filter_items(items, where(seeded, kind="movie"))) == ["Movie B", "Show A", "Show B"]
+    assert titles(tools.filter_items(items, where(seeded, kind="tv"))) == ["Movie A", "Movie B", "Show B"]
+    assert titles(tools.filter_items(items, where(seeded, kind="tv", matching="drop"))) == [
+        "Movie A", "Movie B", "Show A"]
+    # unknown kinds filter everything; items without a kind take the kind of the flow pass
+    assert titles(tools.filter_items(items, where(seeded, kind="series"))) == ["Movie B", "Show B"]
+    assert titles(Tools({"kind": "tv"}).filter_items([{"title": "X", "seeders": 1}], where(seeded, kind="tv"))) == []
+    assert titles(Tools({"kind": "movie"}).filter_items([{"title": "X", "seeders": 1}], where(seeded, kind="tv"))) == [
+        "X"]

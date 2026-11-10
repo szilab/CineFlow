@@ -32,6 +32,10 @@ FILTER_QUERY = (
     Field('matching', 'select', 'Matching items',
           "Keep: only the matching items go on. Drop: the matching items are removed and the rest go on.",
           options=('keep', 'drop'), default='keep'),
+    Field('kind', 'select', 'Media kind',
+          "Which items the filter applies to. The other items go on unchanged, so one flow can "
+          "filter movies and series differently.",
+          options=('both', 'movie', 'tv'), option_labels=('Movies and TV', 'Movies', 'TV'), default='both'),
 )
 
 
@@ -104,6 +108,9 @@ class Tools():  # pylint: disable=too-few-public-methods
         ``at_most`` compare numbers. An item without the field, or without a
         number for a number comparison, does not match the condition.
         ``combine: all`` (default) needs every condition, ``any`` one of them.
+        ``kind: movie`` or ``kind: tv`` limits the filter to the items of that media
+        kind (their ``kind`` field, else the kind of the flow pass); the other items
+        go on unchanged. The default ``both`` filters every item.
         A filter without usable conditions keeps every item.
         """
         query = query if isinstance(query, dict) else {}
@@ -114,17 +121,29 @@ class Tools():  # pylint: disable=too-few-public-methods
             return list(data or [])
         combine = any if query.get('combine') == 'any' else all
         drop = query.get('matching') == 'drop'
+        kind = query.get('kind') if query.get('kind') in ('movie', 'tv') else None
         kept = [
             item for item in data or []
-            if combine(self._matches(item.get(condition['field']), condition['value'],
+            if not self._in_scope(item, kind)
+            or combine(self._matches(item.get(condition['field']), condition['value'],
                                      condition.get('match') or 'equals')
                        for condition in conditions) != drop
         ]
         text = f" {'or' if combine is any else 'and'} ".join(
             f"{condition['field']} {(condition.get('match') or 'equals').replace('_', ' ')} '{condition['value']}'"
             for condition in conditions)
-        log(f"Filter {text} ({'drop' if drop else 'keep'}): {len(kept)} of {len(data or [])} items kept.")
+        scope = f" for {kind} items" if kind else ""
+        log(f"Filter {text} ({'drop' if drop else 'keep'}{scope}): {len(kept)} of {len(data or [])} items kept.")
         return kept
+
+    def _in_scope(self, item: dict, kind: str | None) -> bool:
+        """Return whether the filter applies to the item: any item, or one of the given media kind."""
+        if kind is None:
+            return True
+        item_kind = item.get('kind') or self._cfg.get('kind')
+        if isinstance(item_kind, (list, tuple)):
+            return kind in item_kind
+        return item_kind == kind
 
     @staticmethod
     def _usable(condition: dict) -> bool:
