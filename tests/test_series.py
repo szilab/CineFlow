@@ -341,6 +341,22 @@ def test_jellyfin_next_season_fails_closed_and_leaves_movies_alone() -> None:
     assert client.next_season([{"title": "Arrival"}]) == [{"title": "Arrival"}]
 
 
+def test_jellyfin_next_season_skips_users_without_access_to_the_series() -> None:
+    client = jellyfin_tv({"u1": [episode(1, 1, True), episode(1, 2, True)], "u2": []})
+    client._handler.get.side_effect = lambda endpoint, params: (
+        SimpleNamespace(status=404, data=None) if params["UserId"] == "u2"
+        else SimpleNamespace(status=200, data={"Items": [episode(1, 1, True), episode(1, 2, True)]}))
+    items = [{"title": "Dark", "year": "2017", "tmdbid": 7, "seasons_aired": {1: 2, 2: 4}}]
+
+    # the user who cannot see the series is ignored; the other one watched season 1
+    assert [(item["title"], item["season"]) for item in client.next_season(items)] == [("Dark", 2)]
+
+    # a series no user can see is a failure, not an empty library
+    client._handler.get.side_effect = lambda endpoint, params: SimpleNamespace(status=404, data=None)
+    with pytest.raises(ValueError, match="HTTP 404 for every user"):
+        client.next_season(items)
+
+
 def season_releases(*names: str) -> Jackett:
     consumer = Jackett(config={"url": "https://jackett.invalid", "token": "t", "kind": "tv"})
     consumer._handler = SimpleNamespace(get=lambda endpoint, params: SimpleNamespace(status=200, data={"Results": [

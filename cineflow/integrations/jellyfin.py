@@ -141,12 +141,18 @@ class Jellyfin(MediaServerBase):
     def _episode_state(self, series_id: str, users: List[str]) -> tuple[set, set]:
         """Return the (season, episode) pairs of a series in the library and those watched by anyone."""
         have, watched = set(), set()
+        answered = 0
         for user in users:
             response = self._handler.get(
                 endpoint=f"/Shows/{series_id}/Episodes", params={'UserId': user, 'Fields': 'UserData'},
             )
+            if response.status == 404:
+                # a user without access to the series' library cannot see it; the others still count
+                log(f"Jellyfin series {series_id} is not visible to user {user}, skipped.", level='INFO')
+                continue
             if response.status == 0 or response.status >= 400 or not isinstance(response.data, dict):
                 raise ValueError(f"Failed to query the episodes of Jellyfin series {series_id}: HTTP {response.status}")
+            answered += 1
             for episode in response.data.get('Items') or []:
                 season, number = episode.get('ParentIndexNumber'), episode.get('IndexNumber')
                 # specials and "missing" (virtual) episodes are not in the library
@@ -156,6 +162,8 @@ class Jellyfin(MediaServerBase):
                 have.add((season, number))
                 if (episode.get('UserData') or {}).get('Played'):
                     watched.add((season, number))
+        if users and not answered:
+            raise ValueError(f"Failed to query the episodes of Jellyfin series {series_id}: HTTP 404 for every user")
         return have, watched
 
     def field_choices(self, source: str) -> list[str] | None:
