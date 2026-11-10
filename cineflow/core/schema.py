@@ -487,6 +487,13 @@ DELETE_TORRENTS = ActionDefinition(
     fields=(Field('delete_files', 'boolean', 'Delete files',
                   "Also delete the downloaded data from the disk.", default=False),),
 )
+ADD_TORRENTS = ActionDefinition(
+    'put', 'Add torrents', "Add the item release links to the client.",
+    input=INPUT_DATA, side_effects=True,
+    fields=(Field('kind_folder', 'boolean', 'Folder by media kind',
+                  "Add the media kind (movie or tv) to the download directory, e.g. <directory>/tv. "
+                  "Needs a download directory.", default=False),),
+)
 MOVE_TORRENTS = ActionDefinition(
     'move', 'Move torrents',
     "Moves the data of each item's torrent into a folder of the client's machine.",

@@ -6,8 +6,8 @@ from typing import List, Dict, Any
 import requests
 from cineflow.core.bases.module import TorrentClientBase
 from cineflow.core.schema import (
-    ModuleDefinition, ActionDefinition, Field, LIMIT, INPUT_DATA, INPUT_QUERY, RENAME_FOLDERS,
-    DELETE_TORRENTS, MOVE_TORRENTS, TORRENT_QUERY,
+    ModuleDefinition, ActionDefinition, Field, LIMIT, INPUT_QUERY, RENAME_FOLDERS,
+    ADD_TORRENTS, DELETE_TORRENTS, MOVE_TORRENTS, TORRENT_QUERY,
     consumer_actions,
 )
 from cineflow.core.logger import log
@@ -42,8 +42,7 @@ class Transmission(TorrentClientBase):
         actions=(
             ActionDefinition('get', 'Get torrents', "List the torrents of the client.",
                              input=INPUT_QUERY, query=TORRENT_QUERY, retrieval=True),
-            ActionDefinition('put', 'Add torrents', "Add the item release links to the client.",
-                             input=INPUT_DATA, side_effects=True),
+            ADD_TORRENTS,
             RENAME_FOLDERS,
             MOVE_TORRENTS,
             DELETE_TORRENTS,
@@ -112,8 +111,8 @@ class Transmission(TorrentClientBase):
             return None
 
         params = {}
-        if self.cfg('directory'):
-            params['download-dir'] = self.cfg('directory')
+        if directory := self._download_directory(media):
+            params['download-dir'] = directory
 
         link = media['link']
         if link.startswith('magnet:'):

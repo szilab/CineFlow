@@ -439,6 +439,15 @@ class MediaServerBase(ConsumerBase, ABC):
 class TorrentClientBase(ConsumerBase, ABC):
     """Shared behavior of download client modules."""
 
+    def _download_directory(self, media: dict) -> str | None:
+        """Return the download directory of an item; ``kind_folder`` adds its media kind (movie or tv)."""
+        directory = self.cfg('directory')
+        if not directory or not self.cfg('kind_folder', default=False):
+            return directory or None
+        kind = media.get('kind') if media.get('kind') in ('movie', 'tv') else self._kind
+        separator = '\\' if '\\' in directory and '/' not in directory else '/'
+        return directory.rstrip('/\\') + separator + kind
+
     def search(self, media: dict) -> dict:
         """Search media for the given title in the torrent list."""
         results = self.get(query=sanitize_name(name=media.get('title')))

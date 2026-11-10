@@ -209,3 +209,17 @@ def test_get_collects_at_most_the_limit() -> None:
     client._limit = 3
 
     assert [item["title"] for item in client.get()] == ["Film0", "Film1", "Film2"]
+
+
+def test_kind_folder_adds_the_media_kind_to_the_download_dir() -> None:
+    client = transmission()
+    values = {"directory": "/downloads", "kind_folder": True}
+    client.cfg = Mock(side_effect=lambda key, default=None: values.get(key, default))
+    media = {"link": "magnet:?xt=1"}
+
+    assert client._prepare_params({**media, "kind": "tv"})["download-dir"] == "/downloads/tv"
+    assert client._prepare_params({**media, "kind": "movie"})["download-dir"] == "/downloads/movie"
+    values["kind_folder"] = False
+    assert client._prepare_params({**media, "kind": "tv"})["download-dir"] == "/downloads"
+    values.update({"directory": None, "kind_folder": True})
+    assert "download-dir" not in client._prepare_params({**media, "kind": "tv"})

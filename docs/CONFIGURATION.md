@@ -299,6 +299,20 @@ transmission:
 
 Authentication is optional when the Transmission instance does not require it.
 
+The *Add torrents* step (`put`) of both clients has a `kind_folder` setting
+(default `false`): when `true`, the media kind of each item is added to the
+download directory (`<directory>/movie` or `<directory>/tv`). It needs a
+`directory`; without one the client's own default folder is used.
+
+```yaml
+- name: Add torrents
+  module: qbittorrent
+  action: put
+  input: previous
+  config:
+    kind_folder: true
+```
+
 ### qBittorrent
 
 ```yaml

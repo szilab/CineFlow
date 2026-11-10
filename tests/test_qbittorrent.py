@@ -362,3 +362,21 @@ def test_failed_first_login_is_an_api_failure() -> None:
 
     assert client._api_request('GET', 'api/v2/torrents/info') is None
     client._send_request.assert_not_called()
+
+
+def test_kind_folder_adds_the_media_kind_to_the_save_path() -> None:
+    """With kind_folder the item's media kind (else the flow kind) is appended to the directory."""
+    client = qbittorrent()
+    values = {'directory': '/downloads/', 'kind_folder': True}
+    client.cfg = Mock(side_effect=lambda key, default=None: values.get(key, default))
+    link = {'link': 'magnet:?xt=1'}
+
+    assert client._prepare_params({**link, 'kind': 'tv'})['savepath'] == '/downloads/tv'
+    assert client._prepare_params({**link, 'kind': 'movie'})['savepath'] == '/downloads/movie'
+    assert client._prepare_params({**link, 'kind': ['tv', 'movie']})['savepath'] == f'/downloads/{client._kind}'
+    values['directory'] = 'D:\\Downloads'
+    assert client._prepare_params({**link, 'kind': 'tv'})['savepath'] == 'D:\\Downloads\\tv'
+    values['kind_folder'] = False
+    assert client._prepare_params({**link, 'kind': 'tv'})['savepath'] == 'D:\\Downloads'
+    values.update({'directory': None, 'kind_folder': True})
+    assert 'savepath' not in client._prepare_params({**link, 'kind': 'tv'})
