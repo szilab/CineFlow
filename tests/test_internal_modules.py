@@ -212,6 +212,14 @@ def test_library_remove_and_poster_rules(monkeypatch) -> None:
     # numbers such as seeders and size compare as numbers, not text
     assert [rule["modification"] for rule in poster.rules] == ["border", "triangle", "grayscale"]
 
+    # text rules ignore case by default, and `case_sensitive: true` restores exact matching
+    poster.rules.clear()
+    rules[:] = [{"property": "torrent", "value": "hun", "expression": "token", "modification": "border"},
+                {"property": "torrent", "value": "hun", "expression": "token", "modification": "triangle",
+                 "case_sensitive": True}]
+    instance._create_poster(media)
+    assert [rule["modification"] for rule in poster.rules] == ["border"]
+
 
 def test_poster_rules_are_a_setting_of_the_export_step() -> None:
     from cineflow.core.validation import validate_flow

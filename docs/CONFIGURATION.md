@@ -372,7 +372,6 @@ the step.
       - property: torrent
         expression: token
         value: HUN
-        case_sensitive: false
         modification: border
         color: green
       - property: imdbid
@@ -385,7 +384,7 @@ the step.
 | `property` | item field to check, e.g. `torrent`, `resolution`, `seeders` |
 | `expression` | `token` (has word), `contains`, `eq`, `ne`, `gt`, `lt`, `exists` (default) or `missing` |
 | `value` | comparison value; not needed for `exists` and `missing` |
-| `case_sensitive` | text comparison with case (default `true`); YAML only |
+| `case_sensitive` | compare text with case (default `false`, so `hun` matches `HUN`); YAML only |
 | `modification` | `border`, `triangle` (a corner) or `grayscale` (black and white) |
 | `color` | `yellow`, `blue`, `red` (default), `green`, `white`, `black` or `orange` |
 | `position` | corner of the `triangle`: `top-left`, `top-right` (default), `bottom-left`, `bottom-right` |

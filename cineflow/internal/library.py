@@ -19,7 +19,7 @@ POSTER_RULE = (
           option_labels=('has word', 'contains', 'equals', 'not equals', 'greater than', 'less than',
                          'exists', 'missing'), default='exists'),
     Field('value', 'string', 'Value', "Not needed for exists and missing."),
-    Field('case_sensitive', 'boolean', 'Case sensitive', default=True, hidden=True),
+    Field('case_sensitive', 'boolean', 'Case sensitive', default=False, hidden=True),
     Field('modification', 'select', 'Change', options=('border', 'triangle', 'grayscale'),
           option_labels=('border', 'corner', 'black and white'), default='border'),
     Field('color', 'select', 'Color', "Of the border or the corner.",
@@ -277,7 +277,7 @@ class Library(LibraryBase):
                 left=None if value is None else str(value),
                 right=None if rule.get('value') is None else str(rule.get('value')),
                 expression=rule.get('expression', 'exists'),
-                wcase=rule.get('case_sensitive', True)
+                wcase=rule.get('case_sensitive', False)
             ):
                 img.apply_from_rule(rule={'modification': 'border', **rule})
         return img
